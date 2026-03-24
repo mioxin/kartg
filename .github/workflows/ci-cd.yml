@@ -1,0 +1,149 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ==================== Backend Tests ====================
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test ./... -v -coverprofile=coverage.out
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        flags: backend
+        name: backend-coverage
+
+  # ==================== Backend Lint ====================
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Install golangci-lint
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+    - name: Run golangci-lint
+      run: golangci-lint run ./...
+
+  # ==================== Frontend Tests ====================
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd web
+        npm ci
+
+    - name: Run TypeScript check
+      run: |
+        cd web
+        npx tsc --noEmit
+
+    - name: Build frontend
+      run: |
+        cd web
+        npm run build
+
+  # ==================== Frontend Lint ====================
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd web
+        npm ci
+
+  # ==================== Build Docker ====================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [backend-test, backend-lint, frontend-test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t kartg:${{ github.sha }} .
+
+    - name: Test Docker image
+      run: |
+        docker run --rm kartg:${{ github.sha }} --version || true
+
+  # ==================== Deploy (only on main branch) ====================
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy notification
+      run: |
+        echo "🚀 Deploy triggered by commit ${{ github.sha }}"
+        echo "   Branch: ${{ github.ref }}"
+        echo "   Actor: ${{ github.actor }}"
+        # Здесь можно добавить реальный деплой
+        # Например: docker-compose push, kubectl apply, etc.

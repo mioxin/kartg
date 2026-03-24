@@ -1,0 +1,43 @@
+# Go
+/bin
+*.test
+*.out
+go.sum
+kartg-server
+/docs
+
+# База данных
+*.db
+*.db-journal
+data/
+
+# Node
+node_modules/
+web/node_modules/
+web/dist/
+
+# Proto генерация
+api/proto/*.pb.go
+api/proto/*.pb.gw.go
+api/proto/*.swagger.json
+
+# IDE
+.idea/
+.vscode/
+.qwen/
+*.swp
+*.swo
+QWEN.md
+Roadmap.md
+kartg.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+
+# Env
+.env
+.env.local

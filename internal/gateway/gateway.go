@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,61 +24,141 @@ type Config struct {
 	HTTPAddress string
 }
 
-// Run запускает HTTP gateway сервер
-func Run(ctx context.Context, cfg Config) error {
-	// Создаем mux для обработки HTTP запросов
-	mux := runtime.NewServeMux()
+// Gateway представляет HTTP gateway сервер
+type Gateway struct {
+	mux        *runtime.ServeMux
+	clientPool *ClientPool
+	logger     *slog.Logger
+	config     Config
+	handler    http.Handler // Кэшированный handler с middleware
+}
 
-	// Создаем подключение к gRPC серверу
-	opts := []grpc.DialOption{
+// ServeHTTP реализует интерфейс http.Handler
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if g.handler == nil {
+		g.handler = i18n.LanguageMiddleware(withCORS(g.mux))
+	}
+	g.handler.ServeHTTP(w, r)
+}
+
+// ClientPool содержит пул gRPC клиентов
+type ClientPool struct {
+	conn            *grpc.ClientConn
+	analyticsClient proto.AnalyticsServiceClient
+	operationClient proto.OperationServiceClient
+	cartridgeClient proto.CartridgeServiceClient
+}
+
+// NewClientPool создает пул gRPC клиентов
+func NewClientPool(ctx context.Context, grpcAddress string) (*ClientPool, error) {
+	conn, err := grpc.DialContext(ctx, grpcAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
 	}
 
-	// Регистрируем handlers для каждого сервиса
-	if err := proto.RegisterCartridgeServiceHandlerFromEndpoint(ctx, mux, cfg.GRPCAddress, opts); err != nil {
-		return fmt.Errorf("failed to register CartridgeService: %w", err)
+	return &ClientPool{
+		conn:            conn,
+		analyticsClient: proto.NewAnalyticsServiceClient(conn),
+		operationClient: proto.NewOperationServiceClient(conn),
+		cartridgeClient: proto.NewCartridgeServiceClient(conn),
+	}, nil
+}
+
+// Close закрывает подключение
+func (p *ClientPool) Close() error {
+	if p.conn != nil {
+		return p.conn.Close()
+	}
+	return nil
+}
+
+// NewGateway создает новый gateway сервер
+func NewGateway(ctx context.Context, cfg Config) (*Gateway, error) {
+	logger := slog.Default()
+
+	pool, err := NewClientPool(ctx, cfg.GRPCAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client pool: %w", err)
 	}
 
-	if err := proto.RegisterOperationServiceHandlerFromEndpoint(ctx, mux, cfg.GRPCAddress, opts); err != nil {
-		return fmt.Errorf("failed to register OperationService: %w", err)
+	g := &Gateway{
+		mux:        runtime.NewServeMux(),
+		clientPool: pool,
+		logger:     logger,
+		config:     cfg,
 	}
 
-	if err := proto.RegisterAnalyticsServiceHandlerFromEndpoint(ctx, mux, cfg.GRPCAddress, opts); err != nil {
-		return fmt.Errorf("failed to register AnalyticsService: %w", err)
+	if err := g.registerHandlers(ctx); err != nil {
+		pool.Close()
+		return nil, err
 	}
 
-	if err := proto.RegisterHealthServiceHandlerFromEndpoint(ctx, mux, cfg.GRPCAddress, opts); err != nil {
-		return fmt.Errorf("failed to register HealthService: %w", err)
+	return g, nil
+}
+
+// registerHandlers регистрирует все HTTP handlers
+func (g *Gateway) registerHandlers(ctx context.Context) error {
+	// Регистрируем handlers для gRPC сервисов
+	handlers := []struct {
+		name     string
+		register func(context.Context, *runtime.ServeMux, string, []grpc.DialOption) error
+	}{
+		{"CartridgeService", proto.RegisterCartridgeServiceHandlerFromEndpoint},
+		{"OperationService", proto.RegisterOperationServiceHandlerFromEndpoint},
+		{"AnalyticsService", proto.RegisterAnalyticsServiceHandlerFromEndpoint},
+		{"HealthService", proto.RegisterHealthServiceHandlerFromEndpoint},
 	}
 
-	// Добавляем HTTP обработчики для экспорта
-	mux.HandlePath("GET", "/api/v1/export/refills", handleExportRefills(cfg.GRPCAddress))
-	mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", handleExportCartridgeHistory(cfg.GRPCAddress))
+	for _, h := range handlers {
+		if err := h.register(ctx, g.mux, g.config.GRPCAddress, []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		}); err != nil {
+			return fmt.Errorf("failed to register %s: %w", h.name, err)
+		}
+	}
 
-	// Добавляем CORS заголовки и middleware локализации
-	handler := withCORS(mux)
-	handler = i18n.LanguageMiddleware(handler)
+	// Регистрируем handlers для экспорта
+	g.mux.HandlePath("GET", "/api/v1/export/refills", g.handleExportRefills())
+	g.mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", g.handleExportCartridgeHistory())
 
-	// Запускаем HTTP сервер
-	addr := cfg.HTTPAddress
-	fmt.Printf("HTTP Gateway запущен на %s\n", addr)
-	return http.ListenAndServe(addr, handler)
+	return nil
+}
+
+// Start запускает HTTP сервер
+func (g *Gateway) Start() error {
+	handler := i18n.LanguageMiddleware(withCORS(g.mux))
+
+	g.logger.Info("HTTP Gateway started",
+		"address", g.config.HTTPAddress,
+		"grpc_address", g.config.GRPCAddress)
+
+	return http.ListenAndServe(g.config.HTTPAddress, handler)
+}
+
+// Close закрывает gateway
+func (g *Gateway) Close() error {
+	return g.clientPool.Close()
+}
+
+// Run запускает HTTP gateway сервер (обратная совместимость)
+func Run(ctx context.Context, cfg Config) error {
+	gw, err := NewGateway(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer gw.Close()
+
+	return gw.Start()
 }
 
 // handleExportRefills обрабатывает запросы на экспорт статистики заправок
-func handleExportRefills(grpcAddress string) func(http.ResponseWriter, *http.Request, map[string]string) {
+func (g *Gateway) handleExportRefills() func(http.ResponseWriter, *http.Request, map[string]string) {
 	return func(w http.ResponseWriter, r *http.Request, pathParams map[string]string) {
-		ctx := r.Context()
-
-		// Получаем подключение к gRPC
-		conn, err := grpc.DialContext(ctx, grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Ошибка подключения: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer conn.Close()
-
-		client := proto.NewAnalyticsServiceClient(conn)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
 
 		// Получаем параметры
 		format := r.URL.Query().Get("format")
@@ -84,17 +166,16 @@ func handleExportRefills(grpcAddress string) func(http.ResponseWriter, *http.Req
 			format = "csv"
 		}
 
-		periodStartStr := r.URL.Query().Get("period_start")
-		periodEndStr := r.URL.Query().Get("period_end")
-
-		var periodStart, periodEnd *time.Time
-		if periodStartStr != "" {
-			t, _ := time.Parse("2006-01-02", periodStartStr)
-			periodStart = &t
+		periodStart, err := parseDate(r.URL.Query().Get("period_start"))
+		if err != nil {
+			g.sendError(w, "Invalid period_start format", http.StatusBadRequest)
+			return
 		}
-		if periodEndStr != "" {
-			t, _ := time.Parse("2006-01-02", periodEndStr)
-			periodEnd = &t
+
+		periodEnd, err := parseDate(r.URL.Query().Get("period_end"))
+		if err != nil {
+			g.sendError(w, "Invalid period_end format", http.StatusBadRequest)
+			return
 		}
 
 		// Если период не указан, используем текущий месяц
@@ -109,78 +190,105 @@ func handleExportRefills(grpcAddress string) func(http.ResponseWriter, *http.Req
 		}
 
 		// Запрос к gRPC сервису
-		resp, err := client.ExportRefillsStats(ctx, &proto.ExportRefillsStatsRequest{
+		resp, err := g.clientPool.analyticsClient.ExportRefillsStats(ctx, &proto.ExportRefillsStatsRequest{
 			PeriodStart: timestamppb.New(*periodStart),
 			PeriodEnd:   timestamppb.New(*periodEnd),
 			Format:      format,
 		})
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Ошибка при экспорте: %v", err), http.StatusInternalServerError)
+			g.logger.Error("Export refills stats failed",
+				"error", err,
+				"format", format,
+				"period_start", periodStart.Format("2006-01-02"),
+				"period_end", periodEnd.Format("2006-01-02"))
+			g.sendError(w, "export.error", http.StatusInternalServerError)
 			return
 		}
 
-		// Устанавливаем заголовки для скачивания файла
+		// Отправляем файл
 		filename := fmt.Sprintf("refills_stats_%s_%s.%s",
 			periodStart.Format("20060102"),
 			periodEnd.Format("20060102"),
 			format,
 		)
-		contentType := "text/csv; charset=utf-8"
-		if format != "csv" {
-			contentType = "text/plain; charset=utf-8"
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-		w.Header().Set("Content-Length", strconv.Itoa(len(resp.Value)))
-		w.Write(resp.Value)
+		g.sendFile(w, resp.Value, filename, format)
 	}
 }
 
 // handleExportCartridgeHistory обрабатывает запросы на экспорт истории картриджа
-func handleExportCartridgeHistory(grpcAddress string) func(http.ResponseWriter, *http.Request, map[string]string) {
+func (g *Gateway) handleExportCartridgeHistory() func(http.ResponseWriter, *http.Request, map[string]string) {
 	return func(w http.ResponseWriter, r *http.Request, pathParams map[string]string) {
-		ctx := r.Context()
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
 
-		// Получаем подключение к gRPC
-		conn, err := grpc.DialContext(ctx, grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Ошибка подключения: %v", err), http.StatusInternalServerError)
+		cartridgeID := pathParams["cartridge_id"]
+		if cartridgeID == "" {
+			g.sendError(w, "cartridge_id is required", http.StatusBadRequest)
 			return
 		}
-		defer conn.Close()
 
-		client := proto.NewOperationServiceClient(conn)
-
-		// Получаем параметры
-		cartridgeID := pathParams["cartridge_id"]
 		format := r.URL.Query().Get("format")
 		if format == "" {
 			format = "csv"
 		}
 
 		// Запрос к gRPC сервису
-		resp, err := client.ExportCartridgeHistory(ctx, &proto.ExportCartridgeHistoryRequest{
+		resp, err := g.clientPool.operationClient.ExportCartridgeHistory(ctx, &proto.ExportCartridgeHistoryRequest{
 			CartridgeId: cartridgeID,
 			Format:      format,
 		})
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Ошибка при экспорте: %v", err), http.StatusInternalServerError)
+			g.logger.Error("Export cartridge history failed",
+				"error", err,
+				"cartridge_id", cartridgeID,
+				"format", format)
+			g.sendError(w, "export.error", http.StatusInternalServerError)
 			return
 		}
 
-		// Устанавливаем заголовки для скачивания файла
+		// Отправляем файл
 		filename := fmt.Sprintf("cartridge_%s_history.%s", cartridgeID, format)
-		contentType := "text/csv; charset=utf-8"
-		if format != "csv" {
-			contentType = "text/plain; charset=utf-8"
-		}
-
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-		w.Header().Set("Content-Length", strconv.Itoa(len(resp.Value)))
-		w.Write(resp.Value)
+		g.sendFile(w, resp.Value, filename, format)
 	}
+}
+
+// parseDate парсит дату из строки
+func parseDate(dateStr string) (*time.Time, error) {
+	if dateStr == "" {
+		return nil, nil
+	}
+
+	t, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return &t, nil
+}
+
+// sendFile отправляет файл с правильными заголовками
+func (g *Gateway) sendFile(w http.ResponseWriter, data []byte, filename string, format string) {
+	contentType := "text/csv; charset=utf-8"
+	if format != "csv" {
+		contentType = "text/plain; charset=utf-8"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+
+	// Используем буферизированную запись для эффективности
+	buf := &bytes.Buffer{}
+	buf.Write(data)
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		g.logger.Error("Failed to write response", "error", err)
+	}
+}
+
+// sendError отправляет ошибку с локализацией
+func (g *Gateway) sendError(w http.ResponseWriter, message string, statusCode int) {
+	// Для простых ошибок используем plain text
+	http.Error(w, message, statusCode)
 }
 
 // withCORS добавляет CORS заголовки
