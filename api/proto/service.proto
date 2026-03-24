@@ -1,0 +1,285 @@
+syntax = "proto3";
+
+package kartg.api;
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/mioxin/kartg/api/proto";
+
+// Статус картриджа
+enum CartridgeStatus {
+  CARTRIDGE_STATUS_UNSPECIFIED = 0;
+  CARTRIDGE_STATUS_IN_USE = 1; // В использовании
+  CARTRIDGE_STATUS_REFILLING = 2; // На заправке
+  CARTRIDGE_STATUS_RETIRED = 3; // Утилизирован
+}
+
+// Тип операции
+enum OperationType {
+  OPERATION_TYPE_UNSPECIFIED = 0;
+  OPERATION_TYPE_REGISTRATION = 1; // Регистрация
+  OPERATION_TYPE_SEND_TO_REFILL = 2; // Отправка на заправку
+  OPERATION_TYPE_RECEIVE_FROM_REFILL = 3; // Прием с заправки
+  OPERATION_TYPE_RETIREMENT = 4; // Утилизация
+}
+
+// Картридж
+message Cartridge {
+  string id = 1; // Уникальный ID (серийный номер)
+  string model = 2; // Модель принтера/картриджа
+  CartridgeStatus status = 3; // Текущий статус
+  int32 total_refills = 4; // Общее количество заправок
+  google.protobuf.Timestamp created_at = 5; // Дата создания
+  google.protobuf.Timestamp retired_at = 6; // Дата утилизации
+}
+
+// Транзакция (операция)
+message Transaction {
+  string id = 1; // UUID транзакции
+  string cartridge_id = 2; // ID картриджа
+  OperationType type = 3; // Тип операции
+  google.protobuf.Timestamp timestamp = 4; // Время операции
+  string comment = 5; // Комментарий
+}
+
+// ==================== CartridgeService ====================
+
+// Запрос на регистрацию картриджа
+message RegisterCartridgeRequest {
+  string id = 1; // ID картриджа
+  string model = 2; // Модель
+}
+
+// Запрос на получение информации о картридже
+message GetCartridgeRequest {
+  string id = 1; // ID картриджа
+}
+
+// Запрос на список картриджей
+message ListCartridgesRequest {
+  int32 page = 1; // Номер страницы
+  int32 page_size = 2; // Размер страницы
+  string search = 3; // Поисковый запрос
+  CartridgeStatus status = 4; // Фильтр по статусу
+}
+
+// Ответ со списком картриджей
+message ListCartridgesResponse {
+  repeated Cartridge cartridges = 1; // Список картриджей
+  int32 total_count = 2; // Общее количество
+}
+
+// Сервис управления картриджами
+service CartridgeService {
+  // Регистрация картриджа
+  rpc RegisterCartridge(RegisterCartridgeRequest) returns (Cartridge) {
+    option (google.api.http) = {
+      post: "/api/v1/cartridges"
+      body: "*"
+    };
+  }
+
+  // Получить информацию о картридже
+  rpc GetCartridge(GetCartridgeRequest) returns (Cartridge) {
+    option (google.api.http) = {get: "/api/v1/cartridges/{id}"};
+  }
+
+  // Список картриджей с пагинацией
+  rpc ListCartridges(ListCartridgesRequest) returns (ListCartridgesResponse) {
+    option (google.api.http) = {get: "/api/v1/cartridges"};
+  }
+}
+
+// ==================== OperationService ====================
+
+// Запрос на отправку картриджа на заправку
+message SendToRefillRequest {
+  string cartridge_id = 1; // ID картриджа
+  string comment = 2; // Комментарий
+}
+
+// Запрос на прием картриджа с заправки
+message ReceiveFromRefillRequest {
+  string cartridge_id = 1; // ID картриджа
+  string comment = 2; // Комментарий
+}
+
+// Запрос на утилизацию картриджа
+message RetireCartridgeRequest {
+  string cartridge_id = 1; // ID картриджа
+  string comment = 2; // Комментарий
+}
+
+// Запрос на получение истории операций
+message GetCartridgeHistoryRequest {
+  string cartridge_id = 1; // ID картриджа
+}
+
+// Ответ с историей операций
+message GetCartridgeHistoryResponse {
+  repeated Transaction transactions = 1; // Список транзакций
+}
+
+// Сервис операций
+service OperationService {
+  // Отправить на заправку
+  rpc SendToRefill(SendToRefillRequest) returns (Cartridge) {
+    option (google.api.http) = {
+      post: "/api/v1/operations/send-to-refill"
+      body: "*"
+    };
+  }
+
+  // Принять с заправки
+  rpc ReceiveFromRefill(ReceiveFromRefillRequest) returns (Cartridge) {
+    option (google.api.http) = {
+      post: "/api/v1/operations/receive-from-refill"
+      body: "*"
+    };
+  }
+
+  // Утилизировать картридж
+  rpc RetireCartridge(RetireCartridgeRequest) returns (Cartridge) {
+    option (google.api.http) = {
+      post: "/api/v1/operations/retire"
+      body: "*"
+    };
+  }
+
+  // Получить историю картриджа
+  rpc GetCartridgeHistory(GetCartridgeHistoryRequest) returns (GetCartridgeHistoryResponse) {
+    option (google.api.http) = {get: "/api/v1/cartridges/{cartridge_id}/history"};
+  }
+
+  // Экспорт истории картриджа (CSV/TXT)
+  rpc ExportCartridgeHistory(ExportCartridgeHistoryRequest) returns (google.protobuf.BytesValue) {
+    option (google.api.http) = {get: "/api/v1/export/cartridge/{cartridge_id}/history"};
+  }
+}
+
+// ==================== AnalyticsService ====================
+
+// Запрос статистики заправок за период
+message RefillsStatsRequest {
+  google.protobuf.Timestamp period_start = 1; // Начало периода
+  google.protobuf.Timestamp period_end = 2; // Конец периода
+}
+
+// Ответ со статистикой заправок
+message RefillsStatsResponse {
+  int32 total_refills = 1; // Общее количество заправок
+  int32 unique_cartridges = 2; // Количество уникальных картриджей
+}
+
+// Запрос общей статистики
+message GlobalStatsRequest {}
+
+// Ответ с общей статистикой
+message GlobalStatsResponse {
+  int32 total_cartridges = 1; // Всего картриджей
+  int32 in_use = 2; // В использовании
+  int32 refilling = 3; // На заправке
+  int32 retired = 4; // Утилизировано
+  int32 total_refills_all_time = 5; // Всего заправок за все время
+}
+
+// Запрос на экспорт статистики заправок
+message ExportRefillsStatsRequest {
+  google.protobuf.Timestamp period_start = 1; // Начало периода
+  google.protobuf.Timestamp period_end = 2; // Конец периода
+  string format = 3; // Формат: "csv" или "txt"
+}
+
+// Запрос на экспорт истории картриджа
+message ExportCartridgeHistoryRequest {
+  string cartridge_id = 1; // ID картриджа
+  string format = 2; // Формат: "csv" или "txt"
+}
+
+// Сервис аналитики
+service AnalyticsService {
+  // Статистика заправок за период
+  rpc GetRefillsStats(RefillsStatsRequest) returns (RefillsStatsResponse) {
+    option (google.api.http) = {get: "/api/v1/analytics/refills-stats"};
+  }
+
+  // Общая статистика
+  rpc GetGlobalStats(GlobalStatsRequest) returns (GlobalStatsResponse) {
+    option (google.api.http) = {get: "/api/v1/analytics/global-stats"};
+  }
+
+  // Экспорт статистики заправок (CSV/TXT)
+  rpc ExportRefillsStats(ExportRefillsStatsRequest) returns (google.protobuf.BytesValue) {
+    option (google.api.http) = {get: "/api/v1/export/refills"};
+  }
+}
+
+// ==================== Health Service ====================
+
+// Health check
+service HealthService {
+  rpc Check(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (google.api.http) = {get: "/api/v1/health"};
+  }
+}
+
+// ==================== AuthService ====================
+
+// Информация о пользователе
+message UserInfo {
+  int32 id = 1;
+  string username = 2;
+  string full_name = 3;
+  string role = 4; // admin, user
+}
+
+// Запрос на вход
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+// Запрос на регистрацию пользователя
+message RegisterUserRequest {
+  string username = 1;
+  string password = 2;
+  string full_name = 3;
+  string role = 4;
+}
+
+// Запрос на получение текущего пользователя
+message GetCurrentUserRequest {}
+
+// Ответ на вход
+message LoginResponse {
+  string token = 1;
+  int32 expires_in = 2; // Время жизни токена в секундах
+  UserInfo user = 3;
+}
+
+// Сервис авторизации
+service AuthService {
+  // Вход пользователя
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  // Регистрация пользователя (только для администраторов)
+  rpc RegisterUser(RegisterUserRequest) returns (UserInfo) {
+    option (google.api.http) = {
+      post: "/api/v1/auth/register"
+      body: "*"
+    };
+  }
+
+  // Получить текущего пользователя
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (UserInfo) {
+    option (google.api.http) = {get: "/api/v1/auth/me"};
+  }
+}
