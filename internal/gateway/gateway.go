@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/mioxin/kartg/api/proto"
+	"github.com/mioxin/kartg/internal/i18n"
 )
 
 // Config содержит конфигурацию для gateway
@@ -52,8 +53,9 @@ func Run(ctx context.Context, cfg Config) error {
 	mux.HandlePath("GET", "/api/v1/export/refills", handleExportRefills(cfg.GRPCAddress))
 	mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", handleExportCartridgeHistory(cfg.GRPCAddress))
 
-	// Добавляем CORS заголовки
+	// Добавляем CORS заголовки и middleware локализации
 	handler := withCORS(mux)
+	handler = i18n.LanguageMiddleware(handler)
 
 	// Запускаем HTTP сервер
 	addr := cfg.HTTPAddress

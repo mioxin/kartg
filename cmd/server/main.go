@@ -18,12 +18,12 @@ import (
 	"google.golang.org/grpc/reflection"
 	"gorm.io/gorm"
 
+	"github.com/mioxin/kartg/api/proto"
 	"github.com/mioxin/kartg/internal/database"
 	"github.com/mioxin/kartg/internal/gateway"
+	"github.com/mioxin/kartg/internal/i18n"
 	"github.com/mioxin/kartg/internal/models"
 	"github.com/mioxin/kartg/internal/service"
-
-	"github.com/mioxin/kartg/api/proto"
 )
 
 func main() {
@@ -55,6 +55,12 @@ func main() {
 		"grpc_port", *grpcPort,
 		"http_port", *httpPort,
 		"log_level", *logLevel)
+
+	// Инициализация локализатора
+	if err := i18n.InitLocalizer(); err != nil {
+		log.Fatalf("Ошибка инициализации локализатора: %v", err)
+	}
+	slog.Info("Локализатор инициализирован", "languages", []string{"ru", "en"})
 
 	// Подключение к базе данных
 	db, err := database.New(database.Config{

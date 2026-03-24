@@ -1,0 +1,46 @@
+{
+  "cartridge.registration.success": "Картридж {{.ID}} успешно зарегистрирован",
+  "cartridge.registration.error": "Ошибка при регистрации: {{.Error}}",
+  "cartridge.not_found": "Картридж не найден: {{.ID}}",
+  "cartridge.already_refilling": "Картридж уже находится на заправке",
+  "cartridge.already_retired": "Картридж уже утилизирован",
+  "cartridge.cannot_send_retired": "Нельзя отправить утилизированный картридж на заправку",
+  "cartridge.not_in_refilling": "Картридж не находится на заправке (текущий статус: {{.Status}})",
+  
+  "operation.send_to_refill.success": "Картридж {{.ID}} отправлен на заправку",
+  "operation.send_to_refill.error": "Ошибка при отправке на заправку: {{.Error}}",
+  "operation.receive_from_refill.success": "Картридж {{.ID}} принят с заправки (всего заправок: {{.Count}})",
+  "operation.receive_from_refill.error": "Ошибка при приеме с заправки: {{.Error}}",
+  "operation.retire.success": "Картридж {{.ID}} утилизирован",
+  "operation.retire.error": "Ошибка при утилизации: {{.Error}}",
+  
+  "status.in_use": "В использовании",
+  "status.refilling": "На заправке",
+  "status.retired": "Утилизирован",
+  "status.unspecified": "Не указан",
+  
+  "auth.login.success": "Успешный вход, {{.Username}}",
+  "auth.login.error": "Неверное имя пользователя или пароль",
+  "auth.logout.success": "Выход выполнен",
+  "auth.user_not_found": "Пользователь не найден",
+  "auth.invalid_password": "Неверный пароль",
+  "auth.token_expired": "Срок действия токена истек",
+  "auth.unauthorized": "Пользователь не аутентифицирован",
+  
+  "error.internal": "Внутренняя ошибка сервера",
+  "error.invalid_request": "Неверный запрос",
+  "error.not_found": "Не найдено",
+  "error.already_exists": "Уже существует",
+  "error.validation_failed": "Ошибка валидации",
+  "error.permission_denied": "Доступ запрещен",
+  
+  "export.success": "Экспорт выполнен успешно",
+  "export.error": "Ошибка при экспорте: {{.Error}}",
+  
+  "stats.refills.total": "Всего заправок: {{.Count}}",
+  "stats.refills.unique": "Уникальных картриджей: {{.Count}}",
+  "stats.global.total_cartridges": "Всего картриджей: {{.Count}}",
+  "stats.global.in_use": "В использовании: {{.Count}}",
+  "stats.global.refilling": "На заправке: {{.Count}}",
+  "stats.global.retired": "Утилизировано: {{.Count}}"
+}

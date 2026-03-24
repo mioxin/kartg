@@ -1,0 +1,46 @@
+{
+  "cartridge.registration.success": "Cartridge {{.ID}} successfully registered",
+  "cartridge.registration.error": "Error registering cartridge: {{.Error}}",
+  "cartridge.not_found": "Cartridge not found: {{.ID}}",
+  "cartridge.already_refilling": "Cartridge is already being refilled",
+  "cartridge.already_retired": "Cartridge is already retired",
+  "cartridge.cannot_send_retired": "Cannot send retired cartridge for refill",
+  "cartridge.not_in_refilling": "Cartridge is not being refilled (current status: {{.Status}})",
+  
+  "operation.send_to_refill.success": "Cartridge {{.ID}} sent for refill",
+  "operation.send_to_refill.error": "Error sending for refill: {{.Error}}",
+  "operation.receive_from_refill.success": "Cartridge {{.ID}} received from refill (total refills: {{.Count}})",
+  "operation.receive_from_refill.error": "Error receiving from refill: {{.Error}}",
+  "operation.retire.success": "Cartridge {{.ID}} retired",
+  "operation.retire.error": "Error retiring cartridge: {{.Error}}",
+  
+  "status.in_use": "In Use",
+  "status.refilling": "Refilling",
+  "status.retired": "Retired",
+  "status.unspecified": "Unspecified",
+  
+  "auth.login.success": "Login successful, {{.Username}}",
+  "auth.login.error": "Invalid username or password",
+  "auth.logout.success": "Logout successful",
+  "auth.user_not_found": "User not found",
+  "auth.invalid_password": "Invalid password",
+  "auth.token_expired": "Token has expired",
+  "auth.unauthorized": "User is not authenticated",
+  
+  "error.internal": "Internal server error",
+  "error.invalid_request": "Invalid request",
+  "error.not_found": "Not found",
+  "error.already_exists": "Already exists",
+  "error.validation_failed": "Validation failed",
+  "error.permission_denied": "Permission denied",
+  
+  "export.success": "Export completed successfully",
+  "export.error": "Error during export: {{.Error}}",
+  
+  "stats.refills.total": "Total refills: {{.Count}}",
+  "stats.refills.unique": "Unique cartridges: {{.Count}}",
+  "stats.global.total_cartridges": "Total cartridges: {{.Count}}",
+  "stats.global.in_use": "In use: {{.Count}}",
+  "stats.global.refilling": "Refilling: {{.Count}}",
+  "stats.global.retired": "Retired: {{.Count}}"
+}
