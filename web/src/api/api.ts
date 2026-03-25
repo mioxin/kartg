@@ -68,6 +68,13 @@ export const operationApi = {
     const response = await api.get(`/cartridges/${cartridgeId}/history`)
     return response.data
   },
+
+  generateAct: async (cartridgeIds: string[]): Promise<Blob> => {
+    const response = await api.post('/operations/generate-act', { cartridge_ids: cartridgeIds }, {
+      responseType: 'blob',
+    })
+    return response.data as Blob
+  },
 }
 
 // Analytics API

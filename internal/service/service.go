@@ -382,6 +382,65 @@ func (s *OperationServiceServer) GetCartridgeHistory(ctx context.Context, req *p
 	}, nil
 }
 
+// GenerateAct генерирует акт выдачи картриджей на заправку
+func (s *OperationServiceServer) GenerateAct(ctx context.Context, req *proto.GenerateActRequest) (*wrapperspb.BytesValue, error) {
+	if len(req.CartridgeIds) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "список картриджей не может быть пустым")
+	}
+
+	slog.Info("Генерация акта выдачи", "cartridge_count", len(req.CartridgeIds))
+
+	// Получаем картриджи из БД
+	var cartridges []models.Cartridge
+	result := s.db.Where("id IN ?", req.CartridgeIds).Find(&cartridges)
+
+	if result.Error != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при получении картриджей: %v", result.Error)
+	}
+
+	if len(cartridges) != len(req.CartridgeIds) {
+		return nil, status.Errorf(codes.NotFound, "не все картриджи найдены")
+	}
+
+	// Генерируем Markdown контент акта
+	content := s.generateActMarkdown(cartridges)
+
+	return &wrapperspb.BytesValue{Value: []byte(content)}, nil
+}
+
+// generateActMarkdown генерирует Markdown контент акта
+func (s *OperationServiceServer) generateActMarkdown(cartridges []models.Cartridge) string {
+	var buf strings.Builder
+
+	buf.WriteString("# <center>Акт выдачи картриджей на заправку</center>\n\n")
+	buf.WriteString("Филиал АО \"Kaspi Bank\" в г. Петропавловск выдал на заправку\n")
+	buf.WriteString("в ТОО \"Петроком Центр\" следующие картриджи\n\n")
+
+	// Таблица с картриджами
+	buf.WriteString("| № | ID     | Тип картриджа |\n")
+	buf.WriteString("|---|--------|---------------|\n")
+
+	for i, c := range cartridges {
+		buf.WriteString(fmt.Sprintf("| %d | %-6s | %-13s |\n", i+1, c.ID, c.Model))
+	}
+
+	buf.WriteString(fmt.Sprintf("\nИтого выдано %d картриджей\n\n", len(cartridges)))
+
+	// Подписи
+	buf.WriteString("<table>\n")
+	buf.WriteString("<tr>\n")
+	buf.WriteString("<td width=\"50%\"><b>ФИО/Подпись заказчика</b><br>_____________________</td>\n")
+	buf.WriteString("<td width=\"50%\"><b>ФИО/Подпись подрядчика</b><br>_____________________</td>\n")
+	buf.WriteString("</tr>\n")
+	buf.WriteString("</table>\n\n")
+
+	// Дата
+	buf.WriteString("<br>\n\n")
+	buf.WriteString(fmt.Sprintf("**Дата:** %s\n", time.Now().Format("02.01.2006")))
+
+	return buf.String()
+}
+
 // toProtoTransaction конвертирует модель транзакции в proto сообщение
 func toProtoTransaction(t *models.Transaction) *proto.Transaction {
 	return &proto.Transaction{

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useCartridgeStore } from '../store/cartridgeStore'
-import { modelApi, ModelItem } from '../api/api'
+import { modelApi, ModelItem, operationApi, cartridgeApi } from '../api/api'
 
 type OperationType = 'send' | 'receive' | 'retire'
 
@@ -11,7 +11,7 @@ interface CartridgeItem {
 }
 
 export const OperationsPage: React.FC = () => {
-  const { sendToRefill, receiveFromRefill, retireCartridge, addToast, getCartridge, registerCartridge } = useCartridgeStore()
+  const { sendToRefill, receiveFromRefill, retireCartridge, addToast, getCartridge } = useCartridgeStore()
 
   const [operationType, setOperationType] = useState<OperationType>('send')
   const [inputId, setInputId] = useState('')
@@ -20,6 +20,7 @@ export const OperationsPage: React.FC = () => {
   const [pendingId, setPendingId] = useState('')
   const [loading, setLoading] = useState(false)
   const [processingId, setProcessingId] = useState<string | null>(null)
+  const [lastSentCartridges, setLastSentCartridges] = useState<CartridgeItem[]>([])
 
   // Справочник моделей
   const [models, setModels] = useState<ModelItem[]>([])
@@ -99,6 +100,7 @@ export const OperationsPage: React.FC = () => {
     setInputModel('')
     setShowModelInput(false)
     setPendingId('')
+    setLastSentCartridges([]) // Сбрасываем список отправленных картриджей
   }, [operationType])
 
   // Фокус на поле модели при показе
@@ -188,11 +190,15 @@ export const OperationsPage: React.FC = () => {
     }
 
     try {
-      const cartridge = await registerCartridge(pendingId, inputModel.trim())
-      setCurrentList([...currentList, { 
-        id: cartridge.id, 
+      // Сначала сохраняем модель в справочник
+      await modelApi.upsert(inputModel.trim())
+      
+      // Затем регистрируем картридж
+      const cartridge = await cartridgeApi.register(pendingId, inputModel.trim())
+      setCurrentList([...currentList, {
+        id: cartridge.id,
         status: cartridge.status,
-        model: cartridge.model 
+        model: cartridge.model
       }])
       setShowModelInput(false)
       setPendingId('')
@@ -262,6 +268,7 @@ export const OperationsPage: React.FC = () => {
     let successCount = 0
     let errorCount = 0
     const processedIds: string[] = []
+    const sentCartridges: CartridgeItem[] = []
 
     for (const cartridge of currentList) {
       setProcessingId(cartridge.id)
@@ -277,6 +284,7 @@ export const OperationsPage: React.FC = () => {
 
         if (operationType === 'send') {
           await sendToRefill(cartridge.id, '')
+          sentCartridges.push(cartridge)
         } else if (operationType === 'receive') {
           await receiveFromRefill(cartridge.id, '')
         } else {
@@ -294,9 +302,41 @@ export const OperationsPage: React.FC = () => {
     setCurrentList(currentList.filter(c => !processedIds.includes(c.id)))
 
     setLoading(false)
-    
-    if (successCount > 0) {
+
+    // Сохраняем отправленные картриджи для акта
+    if (operationType === 'send' && sentCartridges.length > 0) {
+      setLastSentCartridges(sentCartridges)
+      addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}. Акт готов к печати.`, errorCount > 0 ? 'error' : 'success')
+    } else if (successCount > 0) {
       addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}`, errorCount > 0 ? 'error' : 'success')
+    }
+  }
+
+  // Генерация и открытие акта
+  const handleGenerateAct = async () => {
+    if (lastSentCartridges.length === 0) {
+      addToast('Нет картриджей для генерации акта', 'error')
+      return
+    }
+
+    try {
+      const cartridgeIds = lastSentCartridges.map(c => c.id)
+      const blob = await operationApi.generateAct(cartridgeIds)
+      
+      // Создаем URL для blob и открываем в новой вкладке
+      const url = URL.createObjectURL(blob)
+      const newWindow = window.open(url, '_blank')
+      
+      if (newWindow) {
+        // Ждем загрузки контента и применяем стили для печати
+        newWindow.onload = () => {
+          URL.revokeObjectURL(url)
+        }
+      }
+      
+      addToast('Акт сгенерирован и открыт в новой вкладке', 'success')
+    } catch (err: any) {
+      addToast(`Ошибка при генерации акта: ${err.message}`, 'error')
     }
   }
 
@@ -447,11 +487,11 @@ export const OperationsPage: React.FC = () => {
                     className={`w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${currentColors.ring} text-sm`}
                     autoComplete="off"
                   />
-                  {/* Выпадающий список с подсказками */}
+                  {/* Выпадающий список с подсказками - позиционируется над полем ввода */}
                   {showModelSuggestions && filteredModels.length > 0 && (
                     <ul
                       ref={modelSuggestionsRef}
-                      className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-auto"
+                      className="absolute z-30 w-full mb-1 bottom-full bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-auto"
                     >
                       {filteredModels.map((model) => (
                         <li
@@ -468,7 +508,7 @@ export const OperationsPage: React.FC = () => {
                     </ul>
                   )}
                   {showModelSuggestions && filteredModels.length === 0 && inputModel && (
-                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg px-4 py-2 text-sm text-gray-500">
+                    <div className="absolute z-30 w-full mb-1 bottom-full bg-white border border-gray-300 rounded-md shadow-lg px-4 py-2 text-sm text-gray-500">
                       Нет совпадений. Введите новое название модели.
                     </div>
                   )}
@@ -580,6 +620,20 @@ export const OperationsPage: React.FC = () => {
                 </span>
               )}
             </button>
+
+            {/* Кнопка генерации акта - только для операции отправки на заправку */}
+            {operationType === 'send' && lastSentCartridges.length > 0 && (
+              <button
+                type="button"
+                onClick={handleGenerateAct}
+                className="w-full mt-3 py-3 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium transition-colors flex items-center justify-center"
+              >
+                <span className="flex items-center">
+                  <span className="mr-2">📄</span>
+                  Акт выдачи ({lastSentCartridges.length})
+                </span>
+              </button>
+            )}
           </div>
         </div>
 
