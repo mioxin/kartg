@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"log"
@@ -12,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,17 +35,52 @@ type Config struct {
 	LogLevel      string
 	JWTSecret     string
 	AdminPassword string
+	Lang          string
 }
 
 // loadConfig загружает конфигурацию из флагов и переменных окружения
 func loadConfig() *Config {
-	dbPath := flag.String("db-path", getEnv("DB_PATH", "kartg.db"), "Путь к базе данных SQLite")
-	grpcPort := flag.String("grpc-port", getEnv("GRPC_PORT", "50051"), "Порт gRPC сервера")
-	httpPort := flag.String("http-port", getEnv("HTTP_PORT", "8080"), "Порт HTTP gateway")
-	logLevel := flag.String("log-level", getEnv("LOG_LEVEL", "info"), "Уровень логирования")
-	jwtSecret := flag.String("jwt-secret", getEnv("JWT_SECRET", ""), "Секретный ключ JWT (обязательно)")
-	adminPassword := flag.String("admin-password", getEnv("ADMIN_PASSWORD", ""), "Пароль администратора (если не указан, будет сгенерирован)")
-	flag.Parse()
+	// Получаем язык из переменной окружения или используем русский по умолчанию
+	defaultLang := getEnv("LANG_CHOICE", getEnv("LANG", "ru"))
+	if len(defaultLang) >= 2 {
+		defaultLang = defaultLang[:2]
+	}
+	if defaultLang != "ru" && defaultLang != "en" {
+		defaultLang = "ru"
+	}
+
+	// Создаем новый FlagSet для контроля над выводом help
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	// Проверяем, указан ли флаг -lang в аргументах командной строки
+	cmdLang := defaultLang
+	for i, arg := range os.Args[1:] {
+		if arg == "-lang" && i+2 < len(os.Args) {
+			cmdLang = os.Args[i+2]
+		} else if strings.HasPrefix(arg, "-lang=") {
+			cmdLang = strings.TrimPrefix(arg, "-lang=")
+		}
+	}
+	if cmdLang != "ru" && cmdLang != "en" {
+		cmdLang = defaultLang
+	}
+
+	// Определяем все флаги с локализованными описаниями на выбранном языке
+	lang := fs.String("lang", defaultLang, i18n.TR(i18n.Language(cmdLang), "cli.flag.lang", nil))
+	dbPath := fs.String("db-path", getEnv("DB_PATH", "data/kartg.db"), i18n.TR(i18n.Language(cmdLang), "cli.flag.db_path", nil))
+	grpcPort := fs.String("grpc-port", getEnv("GRPC_PORT", "50051"), i18n.TR(i18n.Language(cmdLang), "cli.flag.grpc_port", nil))
+	httpPort := fs.String("http-port", getEnv("HTTP_PORT", "8080"), i18n.TR(i18n.Language(cmdLang), "cli.flag.http_port", nil))
+	logLevel := fs.String("log-level", getEnv("LOG_LEVEL", "info"), i18n.TR(i18n.Language(cmdLang), "cli.flag.log_level", nil))
+	jwtSecret := fs.String("jwt-secret", getEnv("JWT_SECRET", ""), i18n.TR(i18n.Language(cmdLang), "cli.flag.jwt_secret", nil))
+	adminPassword := fs.String("admin-password", getEnv("ADMIN_PASSWORD", ""), i18n.TR(i18n.Language(cmdLang), "cli.flag.admin_password", nil))
+
+	fs.Parse(os.Args[1:])
+
+	// Если язык указан в аргументах, используем его
+	actualLang := *lang
+	if actualLang != "ru" && actualLang != "en" {
+		actualLang = defaultLang
+	}
 
 	return &Config{
 		DBPath:        *dbPath,
@@ -55,6 +89,7 @@ func loadConfig() *Config {
 		LogLevel:      *logLevel,
 		JWTSecret:     *jwtSecret,
 		AdminPassword: *adminPassword,
+		Lang:          actualLang,
 	}
 }
 
@@ -91,55 +126,90 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
-// generateSecurePassword генерирует безопасный случайный пароль
-func generateSecurePassword(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return base64.URLEncoding.EncodeToString(bytes)[:length], nil
-}
+// createDefaultAdmin создает пользователя admin с паролем из CLI (если указан)
+func createDefaultAdmin(db *gorm.DB, adminPassword string) error {
+	var count int64
+	db.Model(&models.User{}).Where("username = ? AND deleted_at IS NULL", "admin").Count(&count)
 
-// createDefaultAdmin создает пользователя admin со случайным паролем
-func createDefaultAdmin(db *gorm.DB, providedPassword string) (string, error) {
-	var admin models.User
-	result := db.Where("username = ?", "admin").First(&admin)
-
-	if result.Error == gorm.ErrRecordNotFound {
-		// Генерируем случайный пароль или используем предоставленный
-		password := providedPassword
-		if password == "" {
-			var err error
-			password, err = generateSecurePassword(16)
+	if count == 0 {
+		// Создаем пользователя admin с паролем из CLI или пустым
+		password := ""
+		if adminPassword != "" {
+			// Хешируем пароль из CLI
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 			if err != nil {
-				return "", fmt.Errorf("failed to generate password: %w", err)
+				return fmt.Errorf("failed to hash admin password: %w", err)
 			}
+			password = string(hashedPassword)
 		}
 
-		// Хешируем пароль
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return "", fmt.Errorf("failed to hash password: %w", err)
-		}
-
-		admin = models.User{
+		admin := models.User{
 			Username: "admin",
-			Password: string(hashedPassword),
+			Password: password,
 			FullName: "Administrator",
 			Role:     "admin",
 		}
 
 		if err := db.Create(&admin).Error; err != nil {
-			return "", fmt.Errorf("failed to create admin user: %w", err)
+			return fmt.Errorf("failed to create admin user: %w", err)
 		}
 
-		return password, nil
+		if password != "" {
+			slog.Info("✅ Создан пользователь admin (с паролем из CLI)")
+		} else {
+			slog.Info("✅ Создан пользователь admin (без пароля)")
+		}
+		return nil
 	}
 
-	return "", nil // Пользователь уже существует
+	// Пользователь уже существует - обновляем пароль если указан новый
+	if adminPassword != "" {
+		var admin models.User
+		result := db.Where("username = ?", "admin").First(&admin)
+		if result.Error == nil {
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+			if err != nil {
+				return fmt.Errorf("failed to hash new admin password: %w", err)
+			}
+			db.Model(&admin).Update("password", string(hashedPassword))
+			slog.Info("🔄 Обновлен пароль пользователя admin")
+		}
+	}
+
+	return nil // Пользователь уже существует
+}
+
+// createDefaultUser создает пользователя user с пустым паролем
+func createDefaultUser(db *gorm.DB) error {
+	var count int64
+	db.Model(&models.User{}).Where("username = ? AND deleted_at IS NULL", "user").Count(&count)
+
+	if count == 0 {
+		// Создаем пользователя user с пустым паролем
+		user := models.User{
+			Username: "user",
+			Password: "", // Пустой пароль
+			FullName: "User",
+			Role:     "user",
+		}
+
+		if err := db.Create(&user).Error; err != nil {
+			return fmt.Errorf("failed to create user user: %w", err)
+		}
+
+		slog.Info("✅ Создан пользователь user (без пароля)")
+		return nil
+	}
+
+	return nil // Пользователь уже существует
 }
 
 func main() {
+	// Инициализация локализатора (должна быть до loadConfig)
+	if err := i18n.InitLocalizer(); err != nil {
+		log.Fatalf("Ошибка инициализации локализатора: %v", err)
+	}
+
 	// Загрузка конфигурации
 	cfg := loadConfig()
 
@@ -157,12 +227,6 @@ func main() {
 		"http_port", cfg.HTTPPort,
 		"log_level", cfg.LogLevel)
 
-	// Инициализация локализатора
-	if err := i18n.InitLocalizer(); err != nil {
-		log.Fatalf("Ошибка инициализации локализатора: %v", err)
-	}
-	slog.Info("Локализатор инициализирован", "languages", []string{"ru", "en"})
-
 	// Подключение к базе данных
 	db, err := database.New(database.Config{
 		DBPath:   cfg.DBPath,
@@ -172,22 +236,19 @@ func main() {
 		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
 	}
 
-	// Выполняем миграцию моделей (убрано дублирование)
-	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.User{}); err != nil {
+	// Выполняем миграцию моделей
+	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.User{}, &models.CartridgeModel{}); err != nil {
 		log.Fatalf("Ошибка миграции моделей: %v", err)
 	}
 
-	// Создаем пользователя admin по умолчанию
-	adminPassword, err := createDefaultAdmin(db, cfg.AdminPassword)
-	if err != nil {
+	// Создаем пользователя admin по умолчанию (с паролем из CLI если указан)
+	if err := createDefaultAdmin(db, cfg.AdminPassword); err != nil {
 		log.Fatalf("Ошибка создания пользователя admin: %v", err)
 	}
-	if adminPassword != "" {
-		// Выводим пароль только один раз при создании
-		slog.Info("🔐 СОЗДАН ПОЛЬЗОВАТЕЛЬ ADMIN",
-			"username", "admin",
-			"password", adminPassword,
-			"warning", "СОХРАНИТЕ ЭТОТ ПАРОЛЬ В БЕЗОПАСНОМ МЕСТЕ!")
+
+	// Создаем пользователя user по умолчанию
+	if err := createDefaultUser(db); err != nil {
+		log.Fatalf("Ошибка создания пользователя user: %v", err)
 	}
 
 	// Контекст для graceful shutdown
@@ -210,6 +271,7 @@ func main() {
 	proto.RegisterAnalyticsServiceServer(grpcServer, service.NewAnalyticsServiceServer(db))
 	proto.RegisterHealthServiceServer(grpcServer, service.NewHealthServiceServer())
 	proto.RegisterAuthServiceServer(grpcServer, authService)
+	proto.RegisterModelServiceServer(grpcServer, service.NewModelServiceServer(db))
 
 	// Включаем reflection для отладки
 	reflection.Register(grpcServer)

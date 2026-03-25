@@ -105,3 +105,18 @@ func (c *Cartridge) CanRetire() error {
 	}
 	return nil
 }
+
+// CartridgeModel представляет модель картриджа в справочнике
+type CartridgeModel struct {
+	ID         uint           `gorm:"primaryKey" json:"id"`
+	Name       string         `gorm:"size:200;uniqueIndex;not null" json:"name"`
+	UsageCount int            `gorm:"default:0" json:"usage_count"` // Количество картриджей этой модели
+	LastUsedAt time.Time      `json:"last_used_at"`
+	CreatedAt  time.Time      `json:"created_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// TableName указывает имя таблицы для модели
+func (CartridgeModel) TableName() string {
+	return "cartridge_models"
+}

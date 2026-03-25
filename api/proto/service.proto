@@ -282,4 +282,69 @@ service AuthService {
   rpc GetCurrentUser(GetCurrentUserRequest) returns (UserInfo) {
     option (google.api.http) = {get: "/api/v1/auth/me"};
   }
+
+  // Сменить пароль текущего пользователя
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/auth/change-password"
+      body: "*"
+    };
+  }
+}
+
+// Запрос на смену пароля
+message ChangePasswordRequest {
+  string old_password = 1; // Старый пароль (пустой если не установлен)
+  string new_password = 2; // Новый пароль
+}
+
+// Ответ на смену пароля
+message ChangePasswordResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ==================== ModelService ====================
+
+// Модель картриджа в справочнике
+message ModelItem {
+  uint32 id = 1; // ID в справочнике
+  string name = 2; // Название модели (например: HP 12A)
+  int32 usage_count = 3; // Количество картриджей этой модели
+  google.protobuf.Timestamp last_used_at = 4; // Последнее использование
+  google.protobuf.Timestamp created_at = 5; // Дата создания
+}
+
+// Запрос на получение списка моделей
+message ListModelsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3; // Поиск по названию
+}
+
+// Ответ со списком моделей
+message ListModelsResponse {
+  repeated ModelItem models = 1;
+  int32 total_count = 2;
+}
+
+// Запрос на создание/обновление модели
+message UpsertModelRequest {
+  string name = 1; // Название модели
+}
+
+// Сервис управления справочником моделей
+service ModelService {
+  // Получить список моделей (для выпадающего списка)
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {
+    option (google.api.http) = {get: "/api/v1/models"};
+  }
+
+  // Создать или обновить модель (возвращает ID)
+  rpc UpsertModel(UpsertModelRequest) returns (ModelItem) {
+    option (google.api.http) = {
+      post: "/api/v1/models"
+      body: "*"
+    };
+  }
 }

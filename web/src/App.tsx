@@ -1,9 +1,12 @@
+import React from 'react'
 import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom'
 import { CartridgesPage } from './pages/CartridgesPage'
 import { OperationsPage } from './pages/OperationsPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 import { LoginPage } from './pages/LoginPage'
 import { ToastContainer } from './components/ToastContainer'
+import { ChangePasswordModal } from './components/ChangePasswordModal'
+import { RegisterUserModal } from './components/RegisterUserModal'
 import { useCartridgeStore } from './store/cartridgeStore'
 import { useAuthStore } from './store/authStore'
 
@@ -26,6 +29,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 const AppNav: React.FC = () => {
   const navigate = useNavigate()
   const { isAuthenticated, user, logout } = useAuthStore()
+
+  const [showChangePassword, setShowChangePassword] = React.useState(false)
+  const [showRegisterUser, setShowRegisterUser] = React.useState(false)
 
   const handleLogout = () => {
     logout()
@@ -57,8 +63,32 @@ const AppNav: React.FC = () => {
           <div className="flex items-center space-x-4">
             {isAuthenticated && user && (
               <>
+                <div className="flex items-center space-x-2">
+                  {/* Кнопка смены пароля - для всех кроме admin */}
+                  {user.role !== 'admin' && (
+                    <button
+                      onClick={() => setShowChangePassword(true)}
+                      className="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1"
+                      title="Сменить пароль"
+                    >
+                      <span>🔑</span>
+                      <span>Сменить пароль</span>
+                    </button>
+                  )}
+                  {/* Кнопка регистрации пользователя - только для admin */}
+                  {user.role === 'admin' && (
+                    <button
+                      onClick={() => setShowRegisterUser(true)}
+                      className="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1"
+                      title="Зарегистрировать пользователя"
+                    >
+                      <span>👤</span>
+                      <span>Регистрация</span>
+                    </button>
+                  )}
+                </div>
                 <span className="text-sm text-gray-600">
-                  👤 {user.fullName || user.username}
+                  👤 {user.fullName || user.username} ({user.role})
                 </span>
                 <button
                   onClick={handleLogout}
@@ -71,6 +101,17 @@ const AppNav: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Модальные окна */}
+      <ChangePasswordModal
+        isOpen={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
+      <RegisterUserModal
+        isOpen={showRegisterUser}
+        onClose={() => setShowRegisterUser(false)}
+        onRegistered={() => {}}
+      />
     </nav>
   )
 }

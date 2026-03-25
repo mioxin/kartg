@@ -14,7 +14,7 @@ generate:
 		--go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		--grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-		--openapiv2_out=. --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
+		--openapiv2_out=$(PROTO_PATH) --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
 		$(PROTO_PATH)/service.proto
 	@echo "Генерация завершена!"
 
@@ -31,7 +31,7 @@ build:
 # Запуск бэкенд сервера (в фоне)
 start: build
 	@echo "Запуск сервера kartg..."
-	nohup ./kartg-server > kartg.log 2>&1 &
+	export JWT_SECRET=ваш_секретный_ключ && export ADMIN_PASSWORD="123" && nohup ./kartg-server > kartg.log 2>&1 &
 	@sleep 2
 	@echo "Сервер запущен на http://localhost:8080"
 	@echo "gRPC на localhost:50051"
@@ -40,7 +40,7 @@ start: build
 # Запуск бэкенд сервера (в интерактивном режиме)
 run: build
 	@echo "Запуск сервера kartg..."
-	./kartg-server
+	export JWT_SECRET=ваш_секретный_ключ && export ADMIN_PASSWORD="123" && ./kartg-server
 
 # Остановка бэкенд сервера
 stop:
@@ -62,7 +62,8 @@ restart: stop start
 
 # Очистка сгенерированных файлов
 clean:
-	rm -f api/proto/*.pb.go api/proto/*.pb.gw.go api/proto/*.swagger.json
+	rm -f api/proto/*.pb.go api/proto/*.pb.gw.go
+	rm -f api/proto/*.swagger.json
 	rm -f kartg-server
 	rm -rf data/*.db data/*.db-wal data/*.db-shm
 

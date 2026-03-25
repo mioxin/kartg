@@ -30,6 +30,7 @@ api/proto/*.swagger.json
 QWEN.md
 Roadmap.md
 kartg.txt
+kartg.log
 
 # OS
 .DS_Store

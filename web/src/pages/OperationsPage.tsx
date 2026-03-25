@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useCartridgeStore } from '../store/cartridgeStore'
+import { modelApi, ModelItem } from '../api/api'
 
 type OperationType = 'send' | 'receive' | 'retire'
 
@@ -19,7 +20,12 @@ export const OperationsPage: React.FC = () => {
   const [pendingId, setPendingId] = useState('')
   const [loading, setLoading] = useState(false)
   const [processingId, setProcessingId] = useState<string | null>(null)
-  
+
+  // Справочник моделей
+  const [models, setModels] = useState<ModelItem[]>([])
+  const [showModelSuggestions, setShowModelSuggestions] = useState(false)
+  const modelSuggestionsRef = useRef<HTMLUListElement>(null)
+
   // Отдельные списки для каждой операции
   const [cartridgeLists, setCartridgeLists] = useState<Record<OperationType, CartridgeItem[]>>({
     send: [],
@@ -45,6 +51,47 @@ export const OperationsPage: React.FC = () => {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // Загрузка моделей при монтировании
+  useEffect(() => {
+    loadModels()
+  }, [])
+
+  // Закрытие подсказок при клике вне
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        modelSuggestionsRef.current &&
+        !modelSuggestionsRef.current.contains(event.target as Node) &&
+        modelInputRef.current &&
+        !modelInputRef.current.contains(event.target as Node)
+      ) {
+        setShowModelSuggestions(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const loadModels = async () => {
+    try {
+      const response = await modelApi.list(1, 100)
+      setModels(response.models)
+    } catch (err) {
+      console.error('Ошибка при загрузке моделей:', err)
+    }
+  }
+
+  const selectModel = (modelName: string) => {
+    setInputModel(modelName)
+    setShowModelSuggestions(false)
+    modelInputRef.current?.focus()
+  }
+
+  const filteredModels = models.filter(m =>
+    m.name.toLowerCase().includes(inputModel.toLowerCase())
+  )
 
   // Сброс временных состояний при смене типа операции (списки сохраняем!)
   useEffect(() => {
@@ -382,21 +429,55 @@ export const OperationsPage: React.FC = () => {
                   <span className="text-sm font-medium text-gray-700">ID:</span>
                   <span className={`px-3 py-1 bg-white border border-gray-300 rounded-md font-mono text-sm`}>{pendingId}</span>
                 </div>
-                <div className="flex space-x-2">
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Модель картриджа *
+                  </label>
                   <input
                     ref={modelInputRef}
                     type="text"
                     value={inputModel}
-                    onChange={(e) => setInputModel(e.target.value)}
+                    onChange={(e) => {
+                      setInputModel(e.target.value)
+                      setShowModelSuggestions(true)
+                    }}
+                    onFocus={() => setShowModelSuggestions(true)}
                     onKeyPress={handleModelKeyPress}
-                    placeholder="Модель картриджа (например: HP 12A)"
-                    className={`flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${currentColors.ring} text-sm`}
+                    placeholder="Начните вводить название модели..."
+                    className={`w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${currentColors.ring} text-sm`}
                     autoComplete="off"
                   />
+                  {/* Выпадающий список с подсказками */}
+                  {showModelSuggestions && filteredModels.length > 0 && (
+                    <ul
+                      ref={modelSuggestionsRef}
+                      className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-auto"
+                    >
+                      {filteredModels.map((model) => (
+                        <li
+                          key={model.id}
+                          onClick={() => selectModel(model.name)}
+                          className="px-4 py-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center"
+                        >
+                          <span className="text-gray-900">{model.name}</span>
+                          <span className="text-xs text-gray-500">
+                            {model.usageCount} шт.
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {showModelSuggestions && filteredModels.length === 0 && inputModel && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg px-4 py-2 text-sm text-gray-500">
+                      Нет совпадений. Введите новое название модели.
+                    </div>
+                  )}
+                </div>
+                <div className="flex space-x-2 mt-3">
                   <button
                     type="button"
                     onClick={handleRegisterCartridge}
-                    className={`px-4 py-2 ${currentColors.bg} text-white rounded-md ${currentColors.hover} text-sm font-medium transition-colors`}
+                    className={`flex-1 px-4 py-2 ${currentColors.bg} text-white rounded-md ${currentColors.hover} text-sm font-medium transition-colors`}
                   >
                     Зарегистрировать
                   </button>

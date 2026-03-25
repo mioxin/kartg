@@ -6,19 +6,19 @@
   "cartridge.already_retired": "Cartridge is already retired",
   "cartridge.cannot_send_retired": "Cannot send retired cartridge for refill",
   "cartridge.not_in_refilling": "Cartridge is not being refilled (current status: {{.Status}})",
-  
+
   "operation.send_to_refill.success": "Cartridge {{.ID}} sent for refill",
   "operation.send_to_refill.error": "Error sending for refill: {{.Error}}",
   "operation.receive_from_refill.success": "Cartridge {{.ID}} received from refill (total refills: {{.Count}})",
   "operation.receive_from_refill.error": "Error receiving from refill: {{.Error}}",
   "operation.retire.success": "Cartridge {{.ID}} retired",
   "operation.retire.error": "Error retiring cartridge: {{.Error}}",
-  
+
   "status.in_use": "In Use",
   "status.refilling": "Refilling",
   "status.retired": "Retired",
   "status.unspecified": "Unspecified",
-  
+
   "auth.login.success": "Login successful, {{.Username}}",
   "auth.login.error": "Invalid username or password",
   "auth.logout.success": "Logout successful",
@@ -26,21 +26,37 @@
   "auth.invalid_password": "Invalid password",
   "auth.token_expired": "Token has expired",
   "auth.unauthorized": "User is not authenticated",
-  
+
   "error.internal": "Internal server error",
   "error.invalid_request": "Invalid request",
   "error.not_found": "Not found",
   "error.already_exists": "Already exists",
   "error.validation_failed": "Validation failed",
   "error.permission_denied": "Permission denied",
-  
+
   "export.success": "Export completed successfully",
   "export.error": "Error during export: {{.Error}}",
-  
+
   "stats.refills.total": "Total refills: {{.Count}}",
   "stats.refills.unique": "Unique cartridges: {{.Count}}",
   "stats.global.total_cartridges": "Total cartridges: {{.Count}}",
   "stats.global.in_use": "In use: {{.Count}}",
   "stats.global.refilling": "Refilling: {{.Count}}",
-  "stats.global.retired": "Retired: {{.Count}}"
+  "stats.global.retired": "Retired: {{.Count}}",
+
+  "cli.flag.db_path": "Path to SQLite database",
+  "cli.flag.grpc_port": "gRPC server port",
+  "cli.flag.http_port": "HTTP gateway port",
+  "cli.flag.log_level": "Logging level",
+  "cli.flag.jwt_secret": "JWT secret key (required)",
+  "cli.flag.admin_password": "Admin password (if not specified, will be generated)",
+  "cli.flag.lang": "Interface language (ru|en)",
+
+  "cli.help.db_path.default": "Path to SQLite database",
+  "cli.help.grpc_port.default": "gRPC server port",
+  "cli.help.http_port.default": "HTTP gateway port",
+  "cli.help.log_level.default": "Logging level",
+  "cli.help.jwt_secret.required": "JWT secret key (required)",
+  "cli.help.admin_password.optional": "Admin password (if not specified, will be generated)",
+  "cli.help.lang.optional": "Interface language (ru|en)"
 }

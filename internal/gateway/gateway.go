@@ -110,6 +110,8 @@ func (g *Gateway) registerHandlers(ctx context.Context) error {
 		{"OperationService", proto.RegisterOperationServiceHandlerFromEndpoint},
 		{"AnalyticsService", proto.RegisterAnalyticsServiceHandlerFromEndpoint},
 		{"HealthService", proto.RegisterHealthServiceHandlerFromEndpoint},
+		{"AuthService", proto.RegisterAuthServiceHandlerFromEndpoint},
+		{"ModelService", proto.RegisterModelServiceHandlerFromEndpoint},
 	}
 
 	for _, h := range handlers {

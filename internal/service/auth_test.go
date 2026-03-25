@@ -31,6 +31,15 @@ func TestAuthService_Login(t *testing.T) {
 	}
 	testDB.Create(&testUser)
 
+	// Создаем пользователя с пустым паролем
+	emptyPassUser := models.User{
+		Username: "emptypass",
+		Password: "",
+		FullName: "Empty Pass User",
+		Role:     "user",
+	}
+	testDB.Create(&emptyPassUser)
+
 	tests := []struct {
 		name     string
 		username string
@@ -38,6 +47,7 @@ func TestAuthService_Login(t *testing.T) {
 		wantErr  bool
 	}{
 		{"Успешный вход", "testuser", "password123", false},
+		{"Вход с пустым паролем", "emptypass", "", false},
 		{"Неверный пароль", "testuser", "wrongpassword", true},
 		{"Пользователь не найден", "nonexistent", "password123", true},
 		{"Пустой username", "", "password123", true},

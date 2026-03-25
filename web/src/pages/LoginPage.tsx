@@ -1,21 +1,30 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { authApi } from '../api/api'
 
+const DEFAULT_USERNAME = 'user'
+const STORAGE_KEY = 'kartg_username'
+
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate()
   const { login, isAuthenticated } = useAuthStore()
-  
-  const [username, setUsername] = useState('')
+
+  // Загружаем сохраненное имя пользователя или используем admin по умолчанию
+  const [username, setUsername] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(STORAGE_KEY) || DEFAULT_USERNAME
+    }
+    return DEFAULT_USERNAME
+  })
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   // Если уже аутентифицированы, перенаправляем на главную
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated) {
-      navigate('/cartridges')
+      navigate('/')
     }
   }, [isAuthenticated, navigate])
 
@@ -25,9 +34,12 @@ export const LoginPage: React.FC = () => {
     setLoading(true)
 
     try {
+      // Сохраняем имя пользователя для следующего входа
+      localStorage.setItem(STORAGE_KEY, username)
+      
       const response = await authApi.login(username, password)
       login(response.token, response.user)
-      navigate('/cartridges')
+      navigate('/')
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка при входе. Проверьте логин и пароль.')
     } finally {
@@ -79,7 +91,7 @@ export const LoginPage: React.FC = () => {
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Пароль
+                Пароль <span className="text-gray-400 font-normal">(необязательно)</span>
               </label>
               <div className="mt-1">
                 <input
@@ -87,11 +99,10 @@ export const LoginPage: React.FC = () => {
                   name="password"
                   type="password"
                   autoComplete="current-password"
-                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="admin123"
+                  placeholder="Оставьте пустым, если пароль не установлен"
                 />
               </div>
             </div>
@@ -99,7 +110,7 @@ export const LoginPage: React.FC = () => {
             <div>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !username.trim()}
                 className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -129,9 +140,10 @@ export const LoginPage: React.FC = () => {
 
             <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
               <p className="text-xs text-blue-800">
-                <strong>По умолчанию:</strong><br />
-                👤 Логин: <code className="bg-white px-2 py-0.5 rounded">admin</code><br />
-                🔑 Пароль: <code className="bg-white px-2 py-0.5 rounded">admin123</code>
+                <strong>Пользователи по умолчанию:</strong><br />
+                👤 <code className="bg-white px-2 py-0.5 rounded">admin</code> — администратор<br />
+                👤 <code className="bg-white px-2 py-0.5 rounded">user</code> — обычный пользователь<br />
+                🔑 Пароль: <code className="bg-white px-2 py-0.5 rounded">(пустой)</code> или указан при запуске для admin
               </p>
             </div>
           </div>

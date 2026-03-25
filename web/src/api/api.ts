@@ -175,8 +175,44 @@ export const authApi = {
     return response.data
   },
 
+  changePassword: async (oldPassword: string, newPassword: string) => {
+    const response = await api.post('/auth/change-password', { old_password: oldPassword, new_password: newPassword })
+    return response.data
+  },
+
   logout: () => {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+  },
+}
+
+// Models API (справочник моделей картриджей)
+export interface ModelItem {
+  id: number
+  name: string
+  usageCount: number
+  lastUsedAt: string
+  createdAt: string
+}
+
+export interface ListModelsResponse {
+  models: ModelItem[]
+  totalCount: number
+}
+
+export const modelApi = {
+  list: async (page = 1, pageSize = 50, search = ''): Promise<ListModelsResponse> => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(search && { search }),
+    })
+    const response = await api.get(`/models?${params}`)
+    return response.data
+  },
+
+  upsert: async (name: string): Promise<ModelItem> => {
+    const response = await api.post('/models', { name })
+    return response.data
   },
 }

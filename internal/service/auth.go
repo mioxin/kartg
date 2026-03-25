@@ -93,11 +93,14 @@ func (s *AuthServiceServer) Login(ctx context.Context, req *proto.LoginRequest) 
 		return nil, status.Errorf(codes.Internal, "ошибка при входе: %v", result.Error)
 	}
 
-	// Проверяем пароль
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		slog.Warn("Неверный пароль", "username", req.Username)
-		return nil, status.Errorf(codes.Unauthenticated, "неверное имя пользователя или пароль")
+	// Проверяем пароль (если пароль не пустой)
+	if req.Password != "" && user.Password != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+			slog.Warn("Неверный пароль", "username", req.Username)
+			return nil, status.Errorf(codes.Unauthenticated, "неверное имя пользователя или пароль")
+		}
 	}
+	// Если пароль пустой или у пользователя не установлен пароль - пропускаем проверку
 
 	// Генерируем JWT токен
 	token, err := s.generateToken(user)
@@ -224,5 +227,56 @@ func (s *AuthServiceServer) GetCurrentUser(ctx context.Context, req *proto.GetCu
 		Username: user.Username,
 		FullName: user.FullName,
 		Role:     user.Role,
+	}, nil
+}
+
+// ChangePassword меняет пароль текущего пользователя
+func (s *AuthServiceServer) ChangePassword(ctx context.Context, req *proto.ChangePasswordRequest) (*proto.ChangePasswordResponse, error) {
+	// Получаем user_id из контекста
+	userID, ok := ctx.Value("user_id").(uint)
+	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "пользователь не аутентифицирован")
+	}
+
+	slog.Info("Смена пароля", "user_id", userID)
+
+	var user models.User
+	result := s.db.First(&user, userID)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, status.Errorf(codes.NotFound, "пользователь не найден")
+		}
+		return nil, status.Errorf(codes.Internal, "ошибка при получении пользователя: %v", result.Error)
+	}
+
+	// Проверяем старый пароль (если он установлен)
+	if user.Password != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+			slog.Warn("Неверный старый пароль", "user_id", userID)
+			return &proto.ChangePasswordResponse{
+				Success: false,
+				Message: "Неверный старый пароль",
+			}, nil
+		}
+	}
+
+	// Хешируем новый пароль
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		slog.Error("Ошибка при хешировании нового пароля", "error", err)
+		return nil, status.Errorf(codes.Internal, "ошибка при смене пароля")
+	}
+
+	// Обновляем пароль
+	if err := s.db.Model(&user).Update("password", string(hashedPassword)).Error; err != nil {
+		slog.Error("Ошибка при обновлении пароля", "error", err)
+		return nil, status.Errorf(codes.Internal, "ошибка при смене пароля: %v", err)
+	}
+
+	slog.Info("Пароль успешно изменен", "user_id", userID, "username", user.Username)
+
+	return &proto.ChangePasswordResponse{
+		Success: true,
+		Message: "Пароль успешно изменен",
 	}, nil
 }

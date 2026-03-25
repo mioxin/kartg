@@ -36,35 +36,74 @@ func NewCartridgeServiceServer(db *gorm.DB) *CartridgeServiceServer {
 func (s *CartridgeServiceServer) RegisterCartridge(ctx context.Context, req *proto.RegisterCartridgeRequest) (*proto.Cartridge, error) {
 	slog.Info("Регистрация картриджа", "id", req.Id, "model", req.Model)
 
-	var cartridge models.Cartridge
-	result := s.db.FirstOrCreate(&cartridge, models.Cartridge{ID: req.Id}, map[string]interface{}{
-		"model":         req.Model,
-		"status":        models.CartridgeStatusInUse,
-		"total_refills": 0,
-		"created_at":    time.Now(),
+	// Транзакция БД
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var cartridge models.Cartridge
+		result := tx.FirstOrCreate(&cartridge, models.Cartridge{ID: req.Id}, map[string]interface{}{
+			"model":         req.Model,
+			"status":        models.CartridgeStatusInUse,
+			"total_refills": 0,
+			"created_at":    time.Now(),
+		})
+
+		if result.Error != nil {
+			return fmt.Errorf("ошибка при регистрации: %w", result.Error)
+		}
+
+		// Если картридж уже существовал и модель отличается - обновляем
+		if result.RowsAffected == 0 && cartridge.Model != req.Model && req.Model != "" {
+			slog.Info("Обновление модели картриджа", "id", req.Id, "old_model", cartridge.Model, "new_model", req.Model)
+			tx.Model(&cartridge).Update("model", req.Model)
+			cartridge.Model = req.Model
+		}
+
+		// Сохраняем модель в справочник
+		if req.Model != "" {
+			var model models.CartridgeModel
+			now := time.Now()
+
+			// Пытаемся найти существующую модель
+			modelResult := tx.Where("name = ?", req.Model).First(&model)
+
+			if modelResult.Error == gorm.ErrRecordNotFound {
+				// Создаем новую модель
+				model = models.CartridgeModel{
+					Name:       req.Model,
+					UsageCount: 1,
+					LastUsedAt: now,
+					CreatedAt:  now,
+				}
+				if err := tx.Create(&model).Error; err != nil {
+					return fmt.Errorf("ошибка при создании модели: %w", err)
+				}
+				slog.Info("Создана новая модель в справочнике", "name", req.Model)
+			} else if modelResult.Error == nil {
+				// Обновляем счетчик использования
+				tx.Model(&model).Updates(map[string]interface{}{
+					"usage_count":  gorm.Expr("usage_count + 1"),
+					"last_used_at": now,
+				})
+			}
+		}
+
+		// Создаем транзакцию регистрации
+		transaction := models.Transaction{
+			ID:          uuid.New().String(),
+			CartridgeID: cartridge.ID,
+			Type:        models.OperationTypeRegistration,
+			Timestamp:   time.Now(),
+			Comment:     "Регистрация картриджа",
+		}
+		return tx.Create(&transaction).Error
 	})
 
-	if result.Error != nil {
-		return nil, status.Errorf(codes.Internal, "ошибка при регистрации: %v", result.Error)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при регистрации: %v", err)
 	}
 
-	// Если картридж уже существовал и модель отличается - обновляем
-	if result.RowsAffected == 0 && cartridge.Model != req.Model && req.Model != "" {
-		slog.Info("Обновление модели картриджа", "id", req.Id, "old_model", cartridge.Model, "new_model", req.Model)
-		s.db.Model(&cartridge).Update("model", req.Model)
-		cartridge.Model = req.Model
-	}
-
-	// Создаем транзакцию регистрации
-	transaction := models.Transaction{
-		ID:          uuid.New().String(),
-		CartridgeID: cartridge.ID,
-		Type:        models.OperationTypeRegistration,
-		Timestamp:   time.Now(),
-		Comment:     "Регистрация картриджа",
-	}
-	s.db.Create(&transaction)
-
+	// Перечитываем картридж
+	var cartridge models.Cartridge
+	s.db.First(&cartridge, "id = ?", req.Id)
 	return toProtoCartridge(&cartridge), nil
 }
 
@@ -603,4 +642,105 @@ func NewHealthServiceServer() *HealthServiceServer {
 func (s *HealthServiceServer) Check(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	slog.Debug("Health check passed")
 	return &emptypb.Empty{}, nil
+}
+
+// ModelServiceServer реализует сервис управления моделями картриджей
+type ModelServiceServer struct {
+	proto.UnimplementedModelServiceServer
+	db *gorm.DB
+}
+
+// NewModelServiceServer создает новый сервис управления моделями
+func NewModelServiceServer(db *gorm.DB) *ModelServiceServer {
+	return &ModelServiceServer{db: db}
+}
+
+// ListModels возвращает список моделей картриджей
+func (s *ModelServiceServer) ListModels(ctx context.Context, req *proto.ListModelsRequest) (*proto.ListModelsResponse, error) {
+	var cartridgeModels []models.CartridgeModel
+	var total int64
+
+	query := s.db.Model(&models.CartridgeModel{})
+
+	// Поиск по названию
+	if req.Search != "" {
+		query = query.Where("name LIKE ?", "%"+req.Search+"%")
+	}
+
+	// Общее количество
+	query.Count(&total)
+
+	// Пагинация
+	offset := (req.Page - 1) * req.PageSize
+	if offset < 0 {
+		offset = 0
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	// Сортировка по популярности
+	result := query.Order("usage_count DESC, name ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&cartridgeModels)
+	if result.Error != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при получении списка моделей: %v", result.Error)
+	}
+
+	protoModels := make([]*proto.ModelItem, len(cartridgeModels))
+	for i, m := range cartridgeModels {
+		protoModels[i] = toProtoModelItem(&m)
+	}
+
+	return &proto.ListModelsResponse{
+		Models:     protoModels,
+		TotalCount: int32(total),
+	}, nil
+}
+
+// UpsertModel создает или обновляет модель картриджа
+func (s *ModelServiceServer) UpsertModel(ctx context.Context, req *proto.UpsertModelRequest) (*proto.ModelItem, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "название модели обязательно")
+	}
+
+	slog.Info("Upsert модели картриджа", "name", name)
+
+	var model models.CartridgeModel
+
+	// Пытаемся найти существующую модель
+	result := s.db.Where("name = ?", name).First(&model)
+
+	if result.Error == gorm.ErrRecordNotFound {
+		// Создаем новую модель
+		now := time.Now()
+		model = models.CartridgeModel{
+			Name:       name,
+			UsageCount: 0,
+			LastUsedAt: now,
+			CreatedAt:  now,
+		}
+
+		if err := s.db.Create(&model).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "ошибка при создании модели: %v", err)
+		}
+
+		slog.Info("Создана новая модель картриджа", "id", model.ID, "name", name)
+	} else if result.Error != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при поиске модели: %v", result.Error)
+	}
+	// Если модель найдена - возвращаем существующую
+
+	return toProtoModelItem(&model), nil
+}
+
+// toProtoModelItem конвертирует модель БД в proto сообщение
+func toProtoModelItem(m *models.CartridgeModel) *proto.ModelItem {
+	return &proto.ModelItem{
+		Id:         uint32(m.ID),
+		Name:       m.Name,
+		UsageCount: int32(m.UsageCount),
+		LastUsedAt: timestamppb.New(m.LastUsedAt),
+		CreatedAt:  timestamppb.New(m.CreatedAt),
+	}
 }
