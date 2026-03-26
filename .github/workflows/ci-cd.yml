@@ -6,9 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 env:
-  PROTOC: $(HOME)/local/bin/protoc
+  PROTOC: $HOME/local/bin/protoc
   PROTO_PATH: api/proto
-  INCLUDE_PATH: third_party:$(HOME)/local/include
+  INCLUDE_PATH: third_party: $HOME/local/include
 
 jobs:
   # ==================== Backend Tests ====================
@@ -32,12 +32,12 @@ jobs:
         go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
         go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
         go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
-        $(PROTOC) -I $(PROTO_PATH) -I $(INCLUDE_PATH) \
+        $PROTOC -I $PROTO_PATH -I $INCLUDE_PATH \
         --go_out=. --go_opt=paths=source_relative \
         --go-grpc_out=. --go-grpc_opt=paths=source_relative \
         --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-        --openapiv2_out=$(PROTO_PATH) --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
-        $(PROTO_PATH)/service.proto
+        --openapiv2_out=$PROTO_PATH --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
+        $PROTO_PATH/service.proto
 
 
     - name: Install dependencies
