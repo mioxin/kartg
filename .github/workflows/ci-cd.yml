@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 env:
   PROTO_PATH: api/proto
-  INCLUDE_PATH: third_party:$HOME/local/include
+  INCLUDE_PATH: third_party:${HOME}/local/include
 
 jobs:
   # ==================== Backend Tests ====================
