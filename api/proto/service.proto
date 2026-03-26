@@ -101,6 +101,11 @@ message SendToRefillRequest {
   string comment = 2; // Комментарий
 }
 
+// Запрос на генерацию акта выдачи
+message GenerateActRequest {
+  repeated string cartridge_ids = 1; // ID картриджей в акте
+}
+
 // Запрос на прием картриджа с заправки
 message ReceiveFromRefillRequest {
   string cartridge_id = 1; // ID картриджа
@@ -157,6 +162,14 @@ service OperationService {
   // Экспорт истории картриджа (CSV/TXT)
   rpc ExportCartridgeHistory(ExportCartridgeHistoryRequest) returns (google.protobuf.BytesValue) {
     option (google.api.http) = {get: "/api/v1/export/cartridge/{cartridge_id}/history"};
+  }
+
+  // Генерация акта выдачи на заправку
+  rpc GenerateAct(GenerateActRequest) returns (google.protobuf.BytesValue) {
+    option (google.api.http) = {
+      post: "/api/v1/operations/generate-act"
+      body: "*"
+    };
   }
 }
 
