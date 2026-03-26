@@ -51,7 +51,8 @@ func TestCartridgeService_RegisterCartridge(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
-	svc := NewCartridgeServiceServer(testDB)
+	repo := NewGORMRepository(testDB)
+	svc := NewCartridgeServiceServer(repo)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -113,7 +114,8 @@ func TestOperationService_SendToRefill(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
-	cartridgeSvc := NewCartridgeServiceServer(testDB)
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
 	operationSvc := NewOperationServiceServer(testDB)
 	ctx := context.Background()
 
@@ -191,7 +193,8 @@ func TestOperationService_ReceiveFromRefill(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
-	cartridgeSvc := NewCartridgeServiceServer(testDB)
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
 	operationSvc := NewOperationServiceServer(testDB)
 	ctx := context.Background()
 
@@ -281,7 +284,8 @@ func TestOperationService_RetireCartridge(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
-	cartridgeSvc := NewCartridgeServiceServer(testDB)
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
 	operationSvc := NewOperationServiceServer(testDB)
 	ctx := context.Background()
 
@@ -358,7 +362,8 @@ func TestAnalyticsService_GetGlobalStats(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
-	cartridgeSvc := NewCartridgeServiceServer(testDB)
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
 	analyticsSvc := NewAnalyticsServiceServer(testDB)
 	ctx := context.Background()
 

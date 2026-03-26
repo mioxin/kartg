@@ -207,57 +207,41 @@ func createDefaultUser(db *gorm.DB) error {
 	return nil // Пользователь уже существует
 }
 
-func main() {
-	// Инициализация локализатора (должна быть до loadConfig)
-	if err := i18n.InitLocalizer(); err != nil {
-		log.Fatalf("Ошибка инициализации локализатора: %v", err)
-	}
-
-	// Загрузка конфигурации
-	cfg := loadConfig()
-
-	// Настройка логирования
-	setupLogging(cfg.LogLevel)
-
-	// Валидация конфигурации
-	if err := validateConfig(cfg); err != nil {
-		log.Fatalf("Ошибка конфигурации: %v", err)
-	}
-
-	slog.Info("Запуск сервера kartg",
-		"db_path", cfg.DBPath,
-		"grpc_port", cfg.GRPCPort,
-		"http_port", cfg.HTTPPort,
-		"log_level", cfg.LogLevel)
-
-	// Подключение к базе данных
+// initDatabase инициализирует подключение к базе данных и выполняет миграцию
+func initDatabase(cfg *Config) (*gorm.DB, error) {
 	db, err := database.New(database.Config{
 		DBPath:   cfg.DBPath,
 		LogLevel: cfg.LogLevel,
 	})
 	if err != nil {
-		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
+		return nil, err
 	}
 
 	// Выполняем миграцию моделей
 	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.User{}, &models.CartridgeModel{}); err != nil {
-		log.Fatalf("Ошибка миграции моделей: %v", err)
+		return nil, fmt.Errorf("ошибка миграции моделей: %w", err)
 	}
 
+	return db, nil
+}
+
+// initDefaultUsers создает пользователей по умолчанию
+func initDefaultUsers(db *gorm.DB, adminPassword string) error {
 	// Создаем пользователя admin по умолчанию (с паролем из CLI если указан)
-	if err := createDefaultAdmin(db, cfg.AdminPassword); err != nil {
-		log.Fatalf("Ошибка создания пользователя admin: %v", err)
+	if err := createDefaultAdmin(db, adminPassword); err != nil {
+		return fmt.Errorf("ошибка создания пользователя admin: %w", err)
 	}
 
 	// Создаем пользователя user по умолчанию
 	if err := createDefaultUser(db); err != nil {
-		log.Fatalf("Ошибка создания пользователя user: %v", err)
+		return fmt.Errorf("ошибка создания пользователя user: %w", err)
 	}
 
-	// Контекст для graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	return nil
+}
 
+// runServers запускает gRPC и HTTP серверы
+func runServers(ctx context.Context, cfg *Config, db *gorm.DB) (<-chan error, <-chan error, func(), error) {
 	// Создаем gRPC сервер
 	grpcServer := grpc.NewServer()
 
@@ -268,8 +252,11 @@ func main() {
 		TokenHours: 24,
 	})
 
+	// Создаем репозиторий для соблюдения DIP
+	cartridgeRepo := service.NewGORMRepository(db)
+
 	// Регистрируем сервисы
-	proto.RegisterCartridgeServiceServer(grpcServer, service.NewCartridgeServiceServer(db))
+	proto.RegisterCartridgeServiceServer(grpcServer, service.NewCartridgeServiceServer(cartridgeRepo))
 	proto.RegisterOperationServiceServer(grpcServer, service.NewOperationServiceServer(db))
 	proto.RegisterAnalyticsServiceServer(grpcServer, service.NewAnalyticsServiceServer(db))
 	proto.RegisterHealthServiceServer(grpcServer, service.NewHealthServiceServer())
@@ -283,7 +270,7 @@ func main() {
 	grpcAddr := ":" + cfg.GRPCPort
 	grpcListener, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
-		log.Fatalf("Не удалось создать listener: %v", err)
+		return nil, nil, nil, fmt.Errorf("не удалось создать listener: %w", err)
 	}
 
 	// Канал для ошибок gRPC сервера
@@ -329,6 +316,86 @@ func main() {
 		}
 	}()
 
+	// Функция остановки серверов
+	shutdown := func() {
+		slog.Info("Остановка сервера...")
+
+		// Graceful shutdown
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+
+		// Останавливаем gRPC сервер
+		gracefulStop := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(gracefulStop)
+		}()
+
+		select {
+		case <-gracefulStop:
+			slog.Info("gRPC сервер остановлен")
+		case <-shutdownCtx.Done():
+			slog.Warn("Принудительная остановка gRPC сервера")
+			grpcServer.Stop()
+		}
+
+		// Останавливаем HTTP сервер с shutdown
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("Ошибка при остановке HTTP сервера", "error", err)
+		} else {
+			slog.Info("HTTP сервер остановлен")
+		}
+
+		slog.Info("Сервер остановлен")
+	}
+
+	return grpcErr, httpErr, shutdown, nil
+}
+
+func main() {
+	// Инициализация локализатора (должна быть до loadConfig)
+	if err := i18n.InitLocalizer(); err != nil {
+		log.Fatalf("Ошибка инициализации локализатора: %v", err)
+	}
+
+	// Загрузка конфигурации
+	cfg := loadConfig()
+
+	// Настройка логирования
+	setupLogging(cfg.LogLevel)
+
+	// Валидация конфигурации
+	if err := validateConfig(cfg); err != nil {
+		log.Fatalf("Ошибка конфигурации: %v", err)
+	}
+
+	slog.Info("Запуск сервера kartg",
+		"db_path", cfg.DBPath,
+		"grpc_port", cfg.GRPCPort,
+		"http_port", cfg.HTTPPort,
+		"log_level", cfg.LogLevel)
+
+	// Инициализация базы данных
+	db, err := initDatabase(cfg)
+	if err != nil {
+		log.Fatalf("Не удалось подключиться к базе данных: %v", err)
+	}
+
+	// Создание пользователей по умолчанию
+	if err := initDefaultUsers(db, cfg.AdminPassword); err != nil {
+		log.Fatalf("Ошибка создания пользователей: %v", err)
+	}
+
+	// Контекст для graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Запуск серверов
+	grpcErr, httpErr, shutdown, err := runServers(ctx, cfg, db)
+	if err != nil {
+		log.Fatalf("Ошибка запуска серверов: %v", err)
+	}
+
 	// Обработка сигналов завершения
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -347,35 +414,7 @@ func main() {
 		}
 	}
 
-	slog.Info("Остановка сервера...")
-
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	// Останавливаем gRPC сервер
-	gracefulStop := make(chan struct{})
-	go func() {
-		grpcServer.GracefulStop()
-		close(gracefulStop)
-	}()
-
-	select {
-	case <-gracefulStop:
-		slog.Info("gRPC сервер остановлен")
-	case <-shutdownCtx.Done():
-		slog.Warn("Принудительная остановка gRPC сервера")
-		grpcServer.Stop()
-	}
-
-	// Останавливаем HTTP сервер с shutdown
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		slog.Error("Ошибка при остановке HTTP сервера", "error", err)
-	} else {
-		slog.Info("HTTP сервер остановлен")
-	}
-
-	slog.Info("Сервер остановлен")
+	shutdown()
 }
 
 // getEnv возвращает значение переменной окружения или значение по умолчанию

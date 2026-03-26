@@ -21,26 +21,54 @@ import (
 	"gorm.io/gorm"
 )
 
-// CartridgeServiceServer реализует сервис управления картриджами
-type CartridgeServiceServer struct {
-	proto.UnimplementedCartridgeServiceServer
+// CartridgeRepository определяет интерфейс для работы с картриджами
+// Это позволяет соблюдать Dependency Inversion Principle и упрощает тестирование
+type CartridgeRepository interface {
+	// FindByID находит картридж по ID
+	FindByID(id string) (*models.Cartridge, error)
+	// Register регистрирует новый картридж (создание или обновление)
+	Register(id, model string) (*models.Cartridge, error)
+	// Update обновляет существующий картридж
+	Update(cartridge *models.Cartridge) error
+	// UpdateStatus обновляет статус картриджа
+	UpdateStatus(id string, status models.CartridgeStatus) error
+	// IncrementRefills увеличивает счётчик заправок
+	IncrementRefills(id string) error
+	// List возвращает список картриджей с пагинацией
+	List(search string, page, pageSize int32) ([]models.Cartridge, int64, error)
+	// ListWithStatus возвращает список картриджей с пагинацией и фильтром по статусу
+	ListWithStatus(search string, status models.CartridgeStatus, page, pageSize int32) ([]models.Cartridge, int64, error)
+}
+
+// GORMRepository реализует CartridgeRepository с использованием GORM
+type GORMRepository struct {
 	db *gorm.DB
 }
 
-// NewCartridgeServiceServer создает новый сервис картриджей
-func NewCartridgeServiceServer(db *gorm.DB) *CartridgeServiceServer {
-	return &CartridgeServiceServer{db: db}
+// NewGORMRepository создаёт новый репозиторий
+func NewGORMRepository(db *gorm.DB) *GORMRepository {
+	return &GORMRepository{db: db}
 }
 
-// RegisterCartridge регистрирует новый картридж
-func (s *CartridgeServiceServer) RegisterCartridge(ctx context.Context, req *proto.RegisterCartridgeRequest) (*proto.Cartridge, error) {
-	slog.Info("Регистрация картриджа", "id", req.Id, "model", req.Model)
+// WithTransaction возвращает репозиторий в контексте транзакции
+func (r *GORMRepository) WithTransaction(tx *gorm.DB) CartridgeRepository {
+	return &GORMRepository{db: tx}
+}
 
-	// Транзакция БД
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var cartridge models.Cartridge
-		result := tx.FirstOrCreate(&cartridge, models.Cartridge{ID: req.Id}, map[string]interface{}{
-			"model":         req.Model,
+// FindByID находит картридж по ID
+func (r *GORMRepository) FindByID(id string) (*models.Cartridge, error) {
+	return getCartridgeByID(r.db, id)
+}
+
+// Register регистрирует новый картридж (создание или обновление)
+func (r *GORMRepository) Register(id, model string) (*models.Cartridge, error) {
+	var cartridge models.Cartridge
+
+	// Транзакция для атомарности
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// Создаём или находим картридж
+		result := tx.FirstOrCreate(&cartridge, models.Cartridge{ID: id}, map[string]interface{}{
+			"model":         model,
 			"status":        models.CartridgeStatusInUse,
 			"total_refills": 0,
 			"created_at":    time.Now(),
@@ -51,35 +79,34 @@ func (s *CartridgeServiceServer) RegisterCartridge(ctx context.Context, req *pro
 		}
 
 		// Если картридж уже существовал и модель отличается - обновляем
-		if result.RowsAffected == 0 && cartridge.Model != req.Model && req.Model != "" {
-			slog.Info("Обновление модели картриджа", "id", req.Id, "old_model", cartridge.Model, "new_model", req.Model)
-			tx.Model(&cartridge).Update("model", req.Model)
-			cartridge.Model = req.Model
+		if result.RowsAffected == 0 && cartridge.Model != model && model != "" {
+			slog.Info("Обновление модели картриджа", "id", id, "old_model", cartridge.Model, "new_model", model)
+			tx.Model(&cartridge).Update("model", model)
+			cartridge.Model = model
 		}
 
 		// Сохраняем модель в справочник
-		if req.Model != "" {
-			var model models.CartridgeModel
+		if model != "" {
+			var cartridgeModel models.CartridgeModel
 			now := time.Now()
 
-			// Пытаемся найти существующую модель
-			modelResult := tx.Where("name = ?", req.Model).First(&model)
+			modelResult := tx.Where("name = ?", model).First(&cartridgeModel)
 
 			if modelResult.Error == gorm.ErrRecordNotFound {
 				// Создаем новую модель
-				model = models.CartridgeModel{
-					Name:       req.Model,
+				cartridgeModel = models.CartridgeModel{
+					Name:       model,
 					UsageCount: 1,
 					LastUsedAt: now,
 					CreatedAt:  now,
 				}
-				if err := tx.Create(&model).Error; err != nil {
+				if err := tx.Create(&cartridgeModel).Error; err != nil {
 					return fmt.Errorf("ошибка при создании модели: %w", err)
 				}
-				slog.Info("Создана новая модель в справочнике", "name", req.Model)
+				slog.Info("Создана новая модель в справочнике", "name", model)
 			} else if modelResult.Error == nil {
 				// Обновляем счетчик использования
-				tx.Model(&model).Updates(map[string]interface{}{
+				tx.Model(&cartridgeModel).Updates(map[string]interface{}{
 					"usage_count":  gorm.Expr("usage_count + 1"),
 					"last_used_at": now,
 				})
@@ -101,60 +128,175 @@ func (s *CartridgeServiceServer) RegisterCartridge(ctx context.Context, req *pro
 		return nil, status.Errorf(codes.Internal, "ошибка при регистрации: %v", err)
 	}
 
-	// Перечитываем картридж
+	return &cartridge, nil
+}
+
+// Update обновляет существующий картридж
+func (r *GORMRepository) Update(cartridge *models.Cartridge) error {
+	return r.db.Save(cartridge).Error
+}
+
+// UpdateStatus обновляет статус картриджа
+func (r *GORMRepository) UpdateStatus(id string, status models.CartridgeStatus) error {
+	return r.db.Model(&models.Cartridge{}).Where("id = ?", id).Update("status", status).Error
+}
+
+// IncrementRefills увеличивает счётчик заправок
+func (r *GORMRepository) IncrementRefills(id string) error {
+	return r.db.Model(&models.Cartridge{}).Where("id = ?", id).Update("total_refills", gorm.Expr("total_refills + 1")).Error
+}
+
+// List возвращает список картриджей с пагинацией
+func (r *GORMRepository) List(search string, page, pageSize int32) ([]models.Cartridge, int64, error) {
+	var cartridges []models.Cartridge
+	var total int64
+
+	query := r.db.Model(&models.Cartridge{})
+
+	if search != "" {
+		query = query.Where("id LIKE ? OR model LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	query.Count(&total)
+
+	offset, limit := calculatePagination(page, pageSize)
+
+	result := query.Offset(offset).Limit(limit).Find(&cartridges)
+	if result.Error != nil {
+		return nil, 0, result.Error
+	}
+
+	return cartridges, total, nil
+}
+
+// ListWithStatus возвращает список картриджей с пагинацией и фильтром по статусу
+func (r *GORMRepository) ListWithStatus(search string, status models.CartridgeStatus, page, pageSize int32) ([]models.Cartridge, int64, error) {
+	var cartridges []models.Cartridge
+	var total int64
+
+	query := r.db.Model(&models.Cartridge{})
+
+	if search != "" {
+		query = query.Where("id LIKE ? OR model LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	query.Count(&total)
+
+	offset, limit := calculatePagination(page, pageSize)
+
+	result := query.Offset(offset).Limit(limit).Find(&cartridges)
+	if result.Error != nil {
+		return nil, 0, result.Error
+	}
+
+	return cartridges, total, nil
+}
+
+// getCartridgeByID извлекает картридж по ID с обработкой ошибок
+func getCartridgeByID(tx *gorm.DB, id string) (*models.Cartridge, error) {
 	var cartridge models.Cartridge
-	s.db.First(&cartridge, "id = ?", req.Id)
-	return toProtoCartridge(&cartridge), nil
+	if err := tx.First(&cartridge, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, status.Errorf(codes.NotFound, "картридж не найден: %s", id)
+		}
+		return nil, status.Errorf(codes.Internal, "ошибка: %v", err)
+	}
+	return &cartridge, nil
+}
+
+// writeCSVHeader записывает заголовок CSV
+func writeCSVHeader(writer *csv.Writer, columns []string) error {
+	return writer.Write(columns)
+}
+
+// writeCSVRow записывает строку CSV
+func writeCSVRow(writer *csv.Writer, row []string) error {
+	return writer.Write(row)
+}
+
+// writeTXTHeader записывает заголовок текстового отчета
+func writeTXTHeader(buf *bytes.Buffer, title string, underline string) {
+	buf.WriteString(title + "\n")
+	buf.WriteString(underline + "\n\n")
+}
+
+// writeTXTFooter записывает подвал текстового отчета
+func writeTXTFooter(buf *bytes.Buffer, separator string, summary string) {
+	buf.WriteString("\n" + separator + "\n")
+	buf.WriteString(summary + "\n")
+}
+
+// writeTXTTableHeader записывает заголовок таблицы текстового отчета
+func writeTXTTableHeader(buf *bytes.Buffer, format string, args ...interface{}) {
+	buf.WriteString(fmt.Sprintf(format, args...))
+}
+
+// writeTXTTableRow записывает строку таблицы текстового отчета
+func writeTXTTableRow(buf *bytes.Buffer, format string, args ...interface{}) {
+	buf.WriteString(fmt.Sprintf(format, args...))
+}
+
+// calculatePagination вычисляет offset и limit для пагинации
+func calculatePagination(page, pageSize int32) (offset, limit int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	offset = int((page - 1) * pageSize)
+	limit = int(pageSize)
+	return
+}
+
+// CartridgeServiceServer реализует сервис управления картриджами
+type CartridgeServiceServer struct {
+	proto.UnimplementedCartridgeServiceServer
+	repo CartridgeRepository
+}
+
+// NewCartridgeServiceServer создает новый сервис картриджей
+func NewCartridgeServiceServer(repo CartridgeRepository) *CartridgeServiceServer {
+	return &CartridgeServiceServer{repo: repo}
+}
+
+// RegisterCartridge регистрирует новый картридж
+func (s *CartridgeServiceServer) RegisterCartridge(ctx context.Context, req *proto.RegisterCartridgeRequest) (*proto.Cartridge, error) {
+	slog.Info("Регистрация картриджа", "id", req.Id, "model", req.Model)
+
+	cartridge, err := s.repo.Register(req.Id, req.Model)
+	if err != nil {
+		return nil, err
+	}
+
+	return toProtoCartridge(cartridge), nil
 }
 
 // GetCartridge получает информацию о картридже
 func (s *CartridgeServiceServer) GetCartridge(ctx context.Context, req *proto.GetCartridgeRequest) (*proto.Cartridge, error) {
-	var cartridge models.Cartridge
-	result := s.db.First(&cartridge, "id = ?", req.Id)
-
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return nil, status.Errorf(codes.NotFound, "картридж не найден: %s", req.Id)
-		}
-		return nil, status.Errorf(codes.Internal, "ошибка при получении: %v", result.Error)
+	cartridge, err := s.repo.FindByID(req.Id)
+	if err != nil {
+		return nil, err
 	}
 
-	return toProtoCartridge(&cartridge), nil
+	return toProtoCartridge(cartridge), nil
 }
 
 // ListCartridges возвращает список картриджей с пагинацией
 func (s *CartridgeServiceServer) ListCartridges(ctx context.Context, req *proto.ListCartridgesRequest) (*proto.ListCartridgesResponse, error) {
-	var cartridges []models.Cartridge
-	var total int64
-
-	query := s.db.Model(&models.Cartridge{})
-
-	// Фильтр по поиску
-	if req.Search != "" {
-		query = query.Where("id LIKE ? OR model LIKE ?", "%"+req.Search+"%", "%"+req.Search+"%")
-	}
-
-	// Фильтр по статусу
+	// Преобразуем статус из proto в model
+	var cartridgeStatus models.CartridgeStatus
 	if req.Status != proto.CartridgeStatus_CARTRIDGE_STATUS_UNSPECIFIED {
-		query = query.Where("status = ?", fromProtoStatus(req.Status))
+		cartridgeStatus = fromProtoStatus(req.Status)
 	}
 
-	// Получаем общее количество
-	query.Count(&total)
-
-	// Пагинация
-	offset := (req.Page - 1) * req.PageSize
-	if offset < 0 {
-		offset = 0
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-
-	result := query.Offset(int(offset)).Limit(int(pageSize)).Find(&cartridges)
-	if result.Error != nil {
-		return nil, status.Errorf(codes.Internal, "ошибка при получении списка: %v", result.Error)
+	cartridges, total, err := s.repo.ListWithStatus(req.Search, cartridgeStatus, req.Page, req.PageSize)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при получении списка: %v", err)
 	}
 
 	protoCartridges := make([]*proto.Cartridge, len(cartridges))
@@ -226,12 +368,9 @@ func NewOperationServiceServer(db *gorm.DB) *OperationServiceServer {
 func (s *OperationServiceServer) SendToRefill(ctx context.Context, req *proto.SendToRefillRequest) (*proto.Cartridge, error) {
 	slog.Info("Отправка на заправку", "cartridge_id", req.CartridgeId, "comment", req.Comment)
 
-	var cartridge models.Cartridge
-	if err := s.db.First(&cartridge, "id = ?", req.CartridgeId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, status.Errorf(codes.NotFound, "картридж не найден: %s", req.CartridgeId)
-		}
-		return nil, status.Errorf(codes.Internal, "ошибка: %v", err)
+	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
+	if err != nil {
+		return nil, err
 	}
 
 	// Проверяем валидность перехода
@@ -240,7 +379,7 @@ func (s *OperationServiceServer) SendToRefill(ctx context.Context, req *proto.Se
 	}
 
 	// Транзакция БД
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
 		// Обновляем статус
 		if err := tx.Model(&cartridge).Update("status", models.CartridgeStatusRefilling).Error; err != nil {
 			return err
@@ -262,19 +401,16 @@ func (s *OperationServiceServer) SendToRefill(ctx context.Context, req *proto.Se
 	}
 
 	cartridge.Status = models.CartridgeStatusRefilling
-	return toProtoCartridge(&cartridge), nil
+	return toProtoCartridge(cartridge), nil
 }
 
 // ReceiveFromRefill принимает картридж с заправки
 func (s *OperationServiceServer) ReceiveFromRefill(ctx context.Context, req *proto.ReceiveFromRefillRequest) (*proto.Cartridge, error) {
 	slog.Info("Прием с заправки", "cartridge_id", req.CartridgeId, "comment", req.Comment)
 
-	var cartridge models.Cartridge
-	if err := s.db.First(&cartridge, "id = ?", req.CartridgeId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, status.Errorf(codes.NotFound, "картридж не найден: %s", req.CartridgeId)
-		}
-		return nil, status.Errorf(codes.Internal, "ошибка: %v", err)
+	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
+	if err != nil {
+		return nil, err
 	}
 
 	// Проверяем валидность перехода
@@ -283,7 +419,7 @@ func (s *OperationServiceServer) ReceiveFromRefill(ctx context.Context, req *pro
 	}
 
 	// Транзакция БД
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
 		// Обновляем статус и инкрементируем счетчик заправок
 		updates := map[string]interface{}{
 			"status":        models.CartridgeStatusInUse,
@@ -309,20 +445,18 @@ func (s *OperationServiceServer) ReceiveFromRefill(ctx context.Context, req *pro
 	}
 
 	// Перечитываем картридж для получения актуального счетчика
-	s.db.First(&cartridge, "id = ?", req.CartridgeId)
-	return toProtoCartridge(&cartridge), nil
+	var updatedCartridge models.Cartridge
+	s.db.First(&updatedCartridge, "id = ?", req.CartridgeId)
+	return toProtoCartridge(&updatedCartridge), nil
 }
 
 // RetireCartridge утилизирует картридж
 func (s *OperationServiceServer) RetireCartridge(ctx context.Context, req *proto.RetireCartridgeRequest) (*proto.Cartridge, error) {
 	slog.Info("Утилизация картриджа", "cartridge_id", req.CartridgeId, "comment", req.Comment)
 
-	var cartridge models.Cartridge
-	if err := s.db.First(&cartridge, "id = ?", req.CartridgeId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, status.Errorf(codes.NotFound, "картридж не найден: %s", req.CartridgeId)
-		}
-		return nil, status.Errorf(codes.Internal, "ошибка: %v", err)
+	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
+	if err != nil {
+		return nil, err
 	}
 
 	// Проверяем валидность перехода
@@ -333,7 +467,7 @@ func (s *OperationServiceServer) RetireCartridge(ctx context.Context, req *proto
 	now := time.Now()
 
 	// Транзакция БД
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
 		// Обновляем статус и дату утилизации
 		updates := map[string]interface{}{
 			"status":     models.CartridgeStatusRetired,
@@ -360,7 +494,7 @@ func (s *OperationServiceServer) RetireCartridge(ctx context.Context, req *proto
 
 	cartridge.Status = models.CartridgeStatusRetired
 	cartridge.RetiredAt = &now
-	return toProtoCartridge(&cartridge), nil
+	return toProtoCartridge(cartridge), nil
 }
 
 // GetCartridgeHistory возвращает историю операций картриджа
@@ -571,12 +705,12 @@ func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transact
 	writer.Comma = ';' // Используем точку с запятой для совместимости с Excel
 
 	// Заголовок
-	if err := writer.Write([]string{"ID транзакции", "ID картриджа", "Дата", "Комментарий"}); err != nil {
+	if err := writeCSVHeader(writer, []string{"ID транзакции", "ID картриджа", "Дата", "Комментарий"}); err != nil {
 		return []byte{}
 	}
 
 	for _, t := range transactions {
-		if err := writer.Write([]string{
+		if err := writeCSVRow(writer, []string{
 			t.ID,
 			t.CartridgeID,
 			t.Timestamp.Format("2006-01-02 15:04:05"),
@@ -594,13 +728,12 @@ func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transact
 func (s *AnalyticsServiceServer) exportRefillsTXT(transactions []models.Transaction) []byte {
 	var buf bytes.Buffer
 
-	buf.WriteString("Отчет по заправкам картриджей\n")
-	buf.WriteString("==============================\n\n")
+	writeTXTHeader(&buf, "Отчет по заправкам картриджей", "==============================")
 	buf.WriteString(fmt.Sprintf("Период: %s - %s\n\n",
 		transactions[0].Timestamp.Format("2006-01-02"),
 		transactions[len(transactions)-1].Timestamp.Format("2006-01-02")))
 
-	buf.WriteString(fmt.Sprintf("%-40s %-20s %-25s %s\n", "ID транзакции", "ID картриджа", "Дата", "Комментарий"))
+	writeTXTTableHeader(&buf, "%-40s %-20s %-25s %s\n", "ID транзакции", "ID картриджа", "Дата", "Комментарий")
 	buf.WriteString(strings.Repeat("-", 100) + "\n")
 
 	for _, t := range transactions {
@@ -608,11 +741,10 @@ func (s *AnalyticsServiceServer) exportRefillsTXT(transactions []models.Transact
 		if len(comment) > 30 {
 			comment = comment[:30] + "..."
 		}
-		buf.WriteString(fmt.Sprintf("%-40s %-20s %-25s %s\n", t.ID, t.CartridgeID, t.Timestamp.Format("2006-01-02 15:04:05"), comment))
+		writeTXTTableRow(&buf, "%-40s %-20s %-25s %s\n", t.ID, t.CartridgeID, t.Timestamp.Format("2006-01-02 15:04:05"), comment)
 	}
 
-	buf.WriteString("\n==============================\n")
-	buf.WriteString(fmt.Sprintf("Всего заправок: %d\n", len(transactions)))
+	writeTXTFooter(&buf, "==============================", fmt.Sprintf("Всего заправок: %d", len(transactions)))
 
 	return buf.Bytes()
 }
@@ -651,12 +783,12 @@ func (s *AnalyticsServiceServer) exportHistoryCSV(transactions []models.Transact
 	writer := csv.NewWriter(&buf)
 	writer.Comma = ';'
 
-	if err := writer.Write([]string{"ID транзакции", "Тип операции", "Дата", "Комментарий"}); err != nil {
+	if err := writeCSVHeader(writer, []string{"ID транзакции", "Тип операции", "Дата", "Комментарий"}); err != nil {
 		return []byte{}
 	}
 
 	for _, t := range transactions {
-		if err := writer.Write([]string{
+		if err := writeCSVRow(writer, []string{
 			t.ID,
 			string(t.Type),
 			t.Timestamp.Format("2006-01-02 15:04:05"),
@@ -674,11 +806,10 @@ func (s *AnalyticsServiceServer) exportHistoryCSV(transactions []models.Transact
 func (s *AnalyticsServiceServer) exportHistoryTXT(transactions []models.Transaction, cartridgeID string) []byte {
 	var buf bytes.Buffer
 
-	buf.WriteString("История операций картриджа\n")
-	buf.WriteString("===========================\n\n")
+	writeTXTHeader(&buf, "История операций картриджа", "===========================")
 	buf.WriteString(fmt.Sprintf("ID картриджа: %s\n\n", cartridgeID))
 
-	buf.WriteString(fmt.Sprintf("%-40s %-25s %-25s %s\n", "ID транзакции", "Тип операции", "Дата", "Комментарий"))
+	writeTXTTableHeader(&buf, "%-40s %-25s %-25s %s\n", "ID транзакции", "Тип операции", "Дата", "Комментарий")
 	buf.WriteString(strings.Repeat("-", 110) + "\n")
 
 	for _, t := range transactions {
@@ -686,11 +817,10 @@ func (s *AnalyticsServiceServer) exportHistoryTXT(transactions []models.Transact
 		if len(comment) > 25 {
 			comment = comment[:25] + "..."
 		}
-		buf.WriteString(fmt.Sprintf("%-40s %-25s %-25s %s\n", t.ID, string(t.Type), t.Timestamp.Format("2006-01-02 15:04:05"), comment))
+		writeTXTTableRow(&buf, "%-40s %-25s %-25s %s\n", t.ID, string(t.Type), t.Timestamp.Format("2006-01-02 15:04:05"), comment)
 	}
 
-	buf.WriteString("\n===========================\n")
-	buf.WriteString(fmt.Sprintf("Всего операций: %d\n", len(transactions)))
+	writeTXTFooter(&buf, "===========================", fmt.Sprintf("Всего операций: %d", len(transactions)))
 
 	return buf.Bytes()
 }
@@ -738,17 +868,10 @@ func (s *ModelServiceServer) ListModels(ctx context.Context, req *proto.ListMode
 	query.Count(&total)
 
 	// Пагинация
-	offset := (req.Page - 1) * req.PageSize
-	if offset < 0 {
-		offset = 0
-	}
-	pageSize := req.PageSize
-	if pageSize <= 0 {
-		pageSize = 50
-	}
+	offset, limit := calculatePagination(req.Page, req.PageSize)
 
 	// Сортировка по популярности
-	result := query.Order("usage_count DESC, name ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&cartridgeModels)
+	result := query.Order("usage_count DESC, name ASC").Offset(offset).Limit(limit).Find(&cartridgeModels)
 	if result.Error != nil {
 		return nil, status.Errorf(codes.Internal, "ошибка при получении списка моделей: %v", result.Error)
 	}

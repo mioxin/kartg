@@ -29,7 +29,8 @@ func TestE2E_FullCartridgeLifecycle(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	cartridgeSvc := service.NewCartridgeServiceServer(db)
+	cartridgeRepo := service.NewGORMRepository(db)
+	cartridgeSvc := service.NewCartridgeServiceServer(cartridgeRepo)
 	operationSvc := service.NewOperationServiceServer(db)
 	analyticsSvc := service.NewAnalyticsServiceServer(db)
 
@@ -186,7 +187,8 @@ func TestE2E_DatabaseIntegrity(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	cartridgeSvc := service.NewCartridgeServiceServer(db)
+	cartridgeRepo := service.NewGORMRepository(db)
+	cartridgeSvc := service.NewCartridgeServiceServer(cartridgeRepo)
 	operationSvc := service.NewOperationServiceServer(db)
 
 	// Создаем картридж
