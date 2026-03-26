@@ -9,10 +9,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// contextKey типизированный ключ для context
-type contextKey string
+// // contextKey типизированный ключ для context
+// type contextKey string
 
-const userIDKey contextKey = "user_id"
+// const userIDKey contextKey = "user_id"
 
 // TestAuthService_Login тестирует аутентификацию пользователя
 func TestAuthService_Login(t *testing.T) {
