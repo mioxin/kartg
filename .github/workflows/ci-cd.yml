@@ -25,14 +25,16 @@ jobs:
         go-version: '1.26'
         cache: true
 
-    - name: Install protoc & generate proto
+    - name: Install protoc
+      uses: arduino/setup-protoc@v3.0.0
+    
+    - name: Generate proto
       run: |
         go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
         go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
         go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
         go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
-        export PROTOC=`which protoc`
-        $PROTOC -I $PROTO_PATH -I $INCLUDE_PATH \
+        protoc -I $PROTO_PATH -I $INCLUDE_PATH \
         --go_out=. --go_opt=paths=source_relative \
         --go-grpc_out=. --go-grpc_opt=paths=source_relative \
         --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
