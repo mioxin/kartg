@@ -20,7 +20,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go, protoc, plugins and generate proto
-      uses: ./.github/deps.yml
+      uses: ./.github/proto-gen
 
     - name: Run tests
       run: |
@@ -43,7 +43,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go, protoc, plugins and generate proto
-      uses: ./.github/deps.yml
+      uses: ./.github/proto-gen
 
     - name: Install golangci-lint
       run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
