@@ -6,9 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 env:
-  PROTOC: $HOME/local/bin/protoc
+  PROTOC: ${HOME}/local/bin/protoc
   PROTO_PATH: api/proto
-  INCLUDE_PATH: third_party: $HOME/local/include
+  INCLUDE_PATH: third_party:${HOME}/local/include
 
 jobs:
   # ==================== Backend Tests ====================
