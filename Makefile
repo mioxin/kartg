@@ -79,6 +79,20 @@ install-tools:
 	go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
 	go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
 
+# Установка golangci-lint
+install-lint:
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# ==================== Линтер ====================
+
+# Запуск golangci-lint
+lint:
+	golangci-lint run ./...
+
+# Запуск golangci-lint с автоисправлением
+lint-fix:
+	golangci-lint run ./... --fix
+
 # ==================== Тесты ====================
 
 # Запуск тестов

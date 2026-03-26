@@ -512,15 +512,19 @@ func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transact
 	writer.Comma = ';' // Используем точку с запятой для совместимости с Excel
 
 	// Заголовок
-	writer.Write([]string{"ID транзакции", "ID картриджа", "Дата", "Комментарий"})
+	if err := writer.Write([]string{"ID транзакции", "ID картриджа", "Дата", "Комментарий"}); err != nil {
+		return []byte{}
+	}
 
 	for _, t := range transactions {
-		writer.Write([]string{
+		if err := writer.Write([]string{
 			t.ID,
 			t.CartridgeID,
 			t.Timestamp.Format("2006-01-02 15:04:05"),
 			t.Comment,
-		})
+		}); err != nil {
+			return []byte{}
+		}
 	}
 
 	writer.Flush()
@@ -588,15 +592,19 @@ func (s *AnalyticsServiceServer) exportHistoryCSV(transactions []models.Transact
 	writer := csv.NewWriter(&buf)
 	writer.Comma = ';'
 
-	writer.Write([]string{"ID транзакции", "Тип операции", "Дата", "Комментарий"})
+	if err := writer.Write([]string{"ID транзакции", "Тип операции", "Дата", "Комментарий"}); err != nil {
+		return []byte{}
+	}
 
 	for _, t := range transactions {
-		writer.Write([]string{
+		if err := writer.Write([]string{
 			t.ID,
 			string(t.Type),
 			t.Timestamp.Format("2006-01-02 15:04:05"),
 			t.Comment,
-		})
+		}); err != nil {
+			return []byte{}
+		}
 	}
 
 	writer.Flush()

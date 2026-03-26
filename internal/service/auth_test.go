@@ -9,6 +9,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// contextKey типизированный ключ для context
+type contextKey string
+
+const userIDKey contextKey = "user_id"
+
 // TestAuthService_Login тестирует аутентификацию пользователя
 func TestAuthService_Login(t *testing.T) {
 	setupTestDB(t)
@@ -261,7 +266,7 @@ func TestAuthService_GetCurrentUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctxWithUser := context.Background()
 			if tt.contextUserID != nil {
-				ctxWithUser = context.WithValue(ctxWithUser, "user_id", tt.contextUserID)
+				ctxWithUser = context.WithValue(ctxWithUser, userIDKey, tt.contextUserID)
 			}
 
 			req := &proto.GetCurrentUserRequest{}

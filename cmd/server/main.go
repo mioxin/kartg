@@ -74,7 +74,10 @@ func loadConfig() *Config {
 	jwtSecret := fs.String("jwt-secret", getEnv("JWT_SECRET", ""), i18n.TR(i18n.Language(cmdLang), "cli.flag.jwt_secret", nil))
 	adminPassword := fs.String("admin-password", getEnv("ADMIN_PASSWORD", ""), i18n.TR(i18n.Language(cmdLang), "cli.flag.admin_password", nil))
 
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Если язык указан в аргументах, используем его
 	actualLang := *lang
@@ -381,10 +384,4 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
-}
-
-// serveSwagger обслуживает Swagger UI (заглушка для совместимости)
-func serveSwagger(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"message": "Swagger UI доступен по адресу /swagger/index.html", "spec": "/api/openapi/v2/kartg.swagger.json"}`)
 }

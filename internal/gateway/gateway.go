@@ -51,6 +51,7 @@ type ClientPool struct {
 
 // NewClientPool создает пул gRPC клиентов
 func NewClientPool(ctx context.Context, grpcAddress string) (*ClientPool, error) {
+	// nolint:staticcheck // grpc.DialContext устарел, но будет поддерживаться в 1.x
 	conn, err := grpc.DialContext(ctx, grpcAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
@@ -123,8 +124,9 @@ func (g *Gateway) registerHandlers(ctx context.Context) error {
 	}
 
 	// Регистрируем handlers для экспорта
+	// nolint:errcheck // HandlePath не возвращает ошибку
 	g.mux.HandlePath("GET", "/api/v1/export/refills", g.handleExportRefills())
-	g.mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", g.handleExportCartridgeHistory())
+	g.mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", g.handleExportCartridgeHistory()) // nolint:errcheck
 
 	return nil
 }
