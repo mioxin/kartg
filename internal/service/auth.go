@@ -17,6 +17,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// userContextKey типизированный ключ для context
+type userContextKey string
+
+const userKey userContextKey = "user_id"
+
 // AuthServiceServer реализует сервис авторизации
 type AuthServiceServer struct {
 	proto.UnimplementedAuthServiceServer
@@ -208,7 +213,7 @@ func (s *AuthServiceServer) RegisterUser(ctx context.Context, req *proto.Registe
 // GetCurrentUser возвращает информацию о текущем пользователе
 func (s *AuthServiceServer) GetCurrentUser(ctx context.Context, req *proto.GetCurrentUserRequest) (*proto.UserInfo, error) {
 	// Получаем user_id из контекста (должен быть добавлен middleware)
-	userID, ok := ctx.Value("user_id").(uint)
+	userID, ok := ctx.Value(userKey).(uint)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "пользователь не аутентифицирован")
 	}
@@ -233,7 +238,7 @@ func (s *AuthServiceServer) GetCurrentUser(ctx context.Context, req *proto.GetCu
 // ChangePassword меняет пароль текущего пользователя
 func (s *AuthServiceServer) ChangePassword(ctx context.Context, req *proto.ChangePasswordRequest) (*proto.ChangePasswordResponse, error) {
 	// Получаем user_id из контекста
-	userID, ok := ctx.Value("user_id").(uint)
+	userID, ok := ctx.Value(userKey).(uint)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "пользователь не аутентифицирован")
 	}

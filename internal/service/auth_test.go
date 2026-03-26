@@ -266,7 +266,7 @@ func TestAuthService_GetCurrentUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctxWithUser := context.Background()
 			if tt.contextUserID != nil {
-				ctxWithUser = context.WithValue(ctxWithUser, userIDKey, tt.contextUserID)
+				ctxWithUser = context.WithValue(ctxWithUser, userKey, tt.contextUserID)
 			}
 
 			req := &proto.GetCurrentUserRequest{}
