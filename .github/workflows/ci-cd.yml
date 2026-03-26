@@ -19,35 +19,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.26'
-        cache: true
-
-    - name: Install protoc
-      uses: arduino/setup-protoc@v3.0.0
-
-    - name: Instal proto plugins
-      run: |
-        go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-        go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
-        go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
-   
-    - name: Generate proto
-      run: |
-        protoc -I $PROTO_PATH -I $INCLUDE_PATH \
-        --go_out=$PROTO_PATH --go_opt=paths=source_relative \
-        --go-grpc_out=$PROTO_PATH --go-grpc_opt=paths=source_relative \
-        --grpc-gateway_out=$PROTO_PATH --grpc-gateway_opt=paths=source_relative \
-        --openapiv2_out=$PROTO_PATH --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
-        $PROTO_PATH/service.proto
-
-
-    - name: Install dependencies
-      run: |
-        go mod tidy
+    - name: Set up Go, protoc, plugins and generate proto
+      uses: ./.github/deps.yml
 
     - name: Run tests
       run: |
@@ -69,11 +42,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.26'
-        cache: true
+    - name: Set up Go, protoc, plugins and generate proto
+      uses: ./.github/deps.yml
 
     - name: Install golangci-lint
       run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
