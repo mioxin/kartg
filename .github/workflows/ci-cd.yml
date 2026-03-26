@@ -23,7 +23,7 @@ jobs:
         cache: true
 
     - name: Install dependencies
-      run: go mod download
+      run: go mod tidy
 
     - name: Run tests
       run: go test ./... -v -coverprofile=coverage.out
