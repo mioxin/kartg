@@ -3,7 +3,9 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -128,6 +130,9 @@ func (g *Gateway) registerHandlers(ctx context.Context) error {
 	g.mux.HandlePath("GET", "/api/v1/export/refills", g.handleExportRefills())
 	g.mux.HandlePath("GET", "/api/v1/export/cartridge/{cartridge_id}/history", g.handleExportCartridgeHistory()) // nolint:errcheck
 
+	// Handler для генерации акта выдачи
+	g.mux.HandlePath("POST", "/api/v1/operations/generate-act", g.handleGenerateAct()) // nolint:errcheck
+
 	return nil
 }
 
@@ -191,6 +196,9 @@ func (g *Gateway) handleExportRefills() func(http.ResponseWriter, *http.Request,
 		if periodEnd == nil {
 			now := time.Now()
 			periodEnd = &now
+		} else {
+			endOfDay := time.Date(periodEnd.Year(), periodEnd.Month(), periodEnd.Day(), 23, 59, 59, int(999*time.Millisecond), periodEnd.Location())
+			periodEnd = &endOfDay
 		}
 
 		// Запрос к gRPC сервису
@@ -253,6 +261,49 @@ func (g *Gateway) handleExportCartridgeHistory() func(http.ResponseWriter, *http
 		// Отправляем файл
 		filename := fmt.Sprintf("cartridge_%s_history.%s", cartridgeID, format)
 		g.sendFile(w, resp.Value, filename, format)
+	}
+}
+
+// handleGenerateAct обрабатывает запросы на генерацию акта выдачи
+func (g *Gateway) handleGenerateAct() func(http.ResponseWriter, *http.Request, map[string]string) {
+	return func(w http.ResponseWriter, r *http.Request, pathParams map[string]string) {
+		if r.Method != http.MethodPost {
+			g.sendError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		// Читаем тело запроса
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			g.sendError(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		// Парсим запрос
+		var req proto.GenerateActRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			g.sendError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Запрос к gRPC сервису
+		resp, err := g.clientPool.operationClient.GenerateAct(ctx, &req)
+		if err != nil {
+			g.logger.Error("Generate act failed", "error", err)
+			g.sendError(w, "generate_act.error", http.StatusInternalServerError)
+			return
+		}
+
+		// Отправляем HTML напрямую
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(resp.Value)))
+		if _, err := w.Write(resp.Value); err != nil {
+			g.logger.Error("Failed to write response", "error", err)
+		}
 	}
 }
 

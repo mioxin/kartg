@@ -1,4 +1,4 @@
-.PHONY: generate clean build run start stop restart
+.PHONY: gen clean build run start stop restart
 
 # Пути
 PROTOC := $(HOME)/local/bin/protoc
@@ -8,12 +8,12 @@ INCLUDE_PATH := third_party:$(HOME)/local/include
 # ==================== Генерация ====================
 
 # Генерация кода из proto файлов
-generate:
+gen:
 	@echo "Генерация Go кода gRPC..."
 	$(PROTOC) -I $(PROTO_PATH) -I $(INCLUDE_PATH) \
-		--go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		--grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
+		--go_out=$(PROTO_PATH) --go_opt=paths=source_relative \
+		--go-grpc_out=$(PROTO_PATH) --go-grpc_opt=paths=source_relative \
+		--grpc-gateway_out=$(PROTO_PATH) --grpc-gateway_opt=paths=source_relative \
 		--openapiv2_out=$(PROTO_PATH) --openapiv2_opt=allow_merge=true,merge_file_name=kartg \
 		$(PROTO_PATH)/service.proto
 	@echo "Генерация завершена!"

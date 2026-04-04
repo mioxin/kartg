@@ -21,6 +21,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// CartridgeStats содержит статистику заправок по картриджу
+type CartridgeStats struct {
+	CartridgeID     string
+	Model           string
+	RefillsInPeriod int
+	TotalRefills    int
+}
+
 // CartridgeRepository определяет интерфейс для работы с картриджами
 // Это позволяет соблюдать Dependency Inversion Principle и упрощает тестирование
 type CartridgeRepository interface {
@@ -536,43 +544,10 @@ func (s *OperationServiceServer) GenerateAct(ctx context.Context, req *proto.Gen
 		return nil, status.Errorf(codes.NotFound, "не все картриджи найдены")
 	}
 
-	// Генерируем Markdown контент акта
-	content := s.generateActMarkdown(cartridges)
+	// Генерируем HTML контент акта
+	content := generateActHTML(cartridges)
 
 	return &wrapperspb.BytesValue{Value: []byte(content)}, nil
-}
-
-// generateActMarkdown генерирует Markdown контент акта
-func (s *OperationServiceServer) generateActMarkdown(cartridges []models.Cartridge) string {
-	var buf strings.Builder
-
-	buf.WriteString("# <center>Акт выдачи картриджей на заправку</center>\n\n")
-	buf.WriteString("Филиал АО \"Kaspi Bank\" в г. Петропавловск выдал на заправку\n")
-	buf.WriteString("в ТОО \"Петроком Центр\" следующие картриджи\n\n")
-
-	// Таблица с картриджами
-	buf.WriteString("| № | ID     | Тип картриджа |\n")
-	buf.WriteString("|---|--------|---------------|\n")
-
-	for i, c := range cartridges {
-		buf.WriteString(fmt.Sprintf("| %d | %-6s | %-13s |\n", i+1, c.ID, c.Model))
-	}
-
-	buf.WriteString(fmt.Sprintf("\nИтого выдано %d картриджей\n\n", len(cartridges)))
-
-	// Подписи
-	buf.WriteString("<table>\n")
-	buf.WriteString("<tr>\n")
-	buf.WriteString("<td width=\"50%\"><b>ФИО/Подпись заказчика</b><br>_____________________</td>\n")
-	buf.WriteString("<td width=\"50%\"><b>ФИО/Подпись подрядчика</b><br>_____________________</td>\n")
-	buf.WriteString("</tr>\n")
-	buf.WriteString("</table>\n\n")
-
-	// Дата
-	buf.WriteString("<br>\n\n")
-	buf.WriteString(fmt.Sprintf("**Дата:** %s\n", time.Now().Format("02.01.2006")))
-
-	return buf.String()
 }
 
 // toProtoTransaction конвертирует модель транзакции в proto сообщение
@@ -676,7 +651,7 @@ func (s *AnalyticsServiceServer) ExportRefillsStats(ctx context.Context, req *pr
 
 	slog.Info("Экспорт статистики заправок", "format", format, "period_start", startTime, "period_end", endTime)
 
-	// Получаем данные
+	// Получаем транзакции заправок за период
 	var transactions []models.Transaction
 	query := s.db.Where("type = ? AND timestamp BETWEEN ? AND ?",
 		models.OperationTypeReceiveFromRefill, startTime, endTime).
@@ -687,34 +662,84 @@ func (s *AnalyticsServiceServer) ExportRefillsStats(ctx context.Context, req *pr
 		return nil, status.Errorf(codes.Internal, "ошибка при получении данных: %v", query.Error)
 	}
 
+	// Агрегируем данные по картриджам
+	// Считаем заправки за период по каждому картриджу
+	cartridgeRefills := make(map[string]*CartridgeStats)
+	for _, t := range transactions {
+		if _, exists := cartridgeRefills[t.CartridgeID]; !exists {
+			cartridgeRefills[t.CartridgeID] = &CartridgeStats{
+				CartridgeID: t.CartridgeID,
+			}
+		}
+		cartridgeRefills[t.CartridgeID].RefillsInPeriod++
+	}
+
+	// Получаем модели и общее количество заправок для каждого картриджа
+	for id, stats := range cartridgeRefills {
+		var cartridge models.Cartridge
+		if err := s.db.First(&cartridge, "id = ?", id).Error; err == nil {
+			stats.Model = cartridge.Model
+			stats.TotalRefills = cartridge.TotalRefills
+		}
+	}
+
+	// Преобразуем в слайс для сохранения порядка
+	statsSlice := make([]CartridgeStats, 0, len(cartridgeRefills))
+	for _, stats := range cartridgeRefills {
+		statsSlice = append(statsSlice, *stats)
+	}
+
 	// Генерируем контент в зависимости от формата
 	var content []byte
 	if format == "csv" {
-		content = s.exportRefillsCSV(transactions)
+		content = s.exportRefillsCSV(transactions, statsSlice)
 	} else {
-		content = s.exportRefillsTXT(transactions)
+		content = s.exportRefillsTXT(transactions, statsSlice)
 	}
 
 	return &wrapperspb.BytesValue{Value: content}, nil
 }
 
 // exportRefillsCSV экспортирует данные в CSV формате
-func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transaction) []byte {
+func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transaction, statsSlice []CartridgeStats) []byte {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 	writer.Comma = ';' // Используем точку с запятой для совместимости с Excel
 
-	// Заголовок
-	if err := writeCSVHeader(writer, []string{"ID транзакции", "ID картриджа", "Дата", "Комментарий"}); err != nil {
+	// === Таблица 1: Детализация транзакций ===
+	if err := writeCSVHeader(writer, []string{"№ п/п", "ID транзакции", "ID картриджа", "Дата", "Комментарий"}); err != nil {
 		return []byte{}
 	}
 
-	for _, t := range transactions {
+	for i, t := range transactions {
 		if err := writeCSVRow(writer, []string{
+			fmt.Sprintf("%d", i+1),
 			t.ID,
 			t.CartridgeID,
 			t.Timestamp.Format("2006-01-02 15:04:05"),
 			t.Comment,
+		}); err != nil {
+			return []byte{}
+		}
+	}
+
+	// Пустая строка-разделитель
+	if err := writer.Write([]string{""}); err != nil {
+		return []byte{}
+	}
+
+	// === Таблица 2: Статистика по картриджам ===
+	if err := writeCSVHeader(writer, []string{"№ п/п", "ID картриджа", "Тип картриджа", "Заправок за период", "Заправок с начала регистрации"}); err != nil {
+		return []byte{}
+	}
+
+	for i, stats := range statsSlice {
+		if err := writeCSVRow(writer, []string{
+			fmt.Sprintf("%d", i+1),
+			stats.CartridgeID,
+			stats.Model,
+			fmt.Sprintf("%d", stats.RefillsInPeriod),
+			fmt.Sprintf("%d", stats.TotalRefills),
 		}); err != nil {
 			return []byte{}
 		}
@@ -725,26 +750,61 @@ func (s *AnalyticsServiceServer) exportRefillsCSV(transactions []models.Transact
 }
 
 // exportRefillsTXT экспортирует данные в текстовом формате
-func (s *AnalyticsServiceServer) exportRefillsTXT(transactions []models.Transaction) []byte {
+func (s *AnalyticsServiceServer) exportRefillsTXT(transactions []models.Transaction, statsSlice []CartridgeStats) []byte {
 	var buf bytes.Buffer
 
+	// === Таблица 1: Детализация транзакций ===
 	writeTXTHeader(&buf, "Отчет по заправкам картриджей", "==============================")
-	buf.WriteString(fmt.Sprintf("Период: %s - %s\n\n",
-		transactions[0].Timestamp.Format("2006-01-02"),
-		transactions[len(transactions)-1].Timestamp.Format("2006-01-02")))
 
-	writeTXTTableHeader(&buf, "%-40s %-20s %-25s %s\n", "ID транзакции", "ID картриджа", "Дата", "Комментарий")
-	buf.WriteString(strings.Repeat("-", 100) + "\n")
-
-	for _, t := range transactions {
-		comment := t.Comment
-		if len(comment) > 30 {
-			comment = comment[:30] + "..."
-		}
-		writeTXTTableRow(&buf, "%-40s %-20s %-25s %s\n", t.ID, t.CartridgeID, t.Timestamp.Format("2006-01-02 15:04:05"), comment)
+	// Период
+	if len(transactions) > 0 {
+		buf.WriteString(fmt.Sprintf("Период: %s - %s\n\n",
+			transactions[0].Timestamp.Format("2006-01-02"),
+			transactions[len(transactions)-1].Timestamp.Format("2006-01-02")))
 	}
 
-	writeTXTFooter(&buf, "==============================", fmt.Sprintf("Всего заправок: %d", len(transactions)))
+	buf.WriteString(fmt.Sprintf("%-6s %-40s %-20s %-25s %s\n", "№ п/п", "ID транзакции", "ID картриджа", "Дата", "Комментарий"))
+	buf.WriteString(strings.Repeat("-", 115) + "\n")
+
+	for i, t := range transactions {
+		comment := t.Comment
+		if len(comment) > 20 {
+			comment = comment[:20] + "..."
+		}
+		writeTXTTableRow(&buf, "%-6d %-40s %-20s %-25s %s\n",
+			i+1,
+			t.ID,
+			t.CartridgeID,
+			t.Timestamp.Format("2006-01-02 15:04:05"),
+			comment)
+	}
+
+	buf.WriteString(strings.Repeat("-", 115) + "\n")
+	buf.WriteString(fmt.Sprintf("\nВсего заправок: %d\n\n", len(transactions)))
+
+	// === Разделитель ===
+	buf.WriteString("\n")
+
+	// === Таблица 2: Статистика по картриджам ===
+	buf.WriteString(fmt.Sprintf("%-6s %-25s %-20s %-20s %s\n", "№ п/п", "ID картриджа", "Тип картриджа", "Заправок за период", "Заправок всего"))
+	buf.WriteString(strings.Repeat("-", 95) + "\n")
+
+	totalPeriod := 0
+	totalAll := 0
+
+	for i, stats := range statsSlice {
+		writeTXTTableRow(&buf, "%-6d %-25s %-20s %-20d %d\n",
+			i+1,
+			stats.CartridgeID,
+			stats.Model,
+			stats.RefillsInPeriod,
+			stats.TotalRefills)
+		totalPeriod += stats.RefillsInPeriod
+		totalAll += stats.TotalRefills
+	}
+
+	buf.WriteString(strings.Repeat("-", 95) + "\n")
+	writeTXTFooter(&buf, "==============================", fmt.Sprintf("Итого картриджей: %d, заправок за период: %d, всего заправок: %d", len(statsSlice), totalPeriod, totalAll))
 
 	return buf.Bytes()
 }

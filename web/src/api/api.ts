@@ -69,11 +69,9 @@ export const operationApi = {
     return response.data
   },
 
-  generateAct: async (cartridgeIds: string[]): Promise<Blob> => {
-    const response = await api.post('/operations/generate-act', { cartridge_ids: cartridgeIds }, {
-      responseType: 'blob',
-    })
-    return response.data as Blob
+  generateAct: async (cartridgeIds: string[]): Promise<string> => {
+    const response = await api.post('/operations/generate-act', { cartridge_ids: cartridgeIds })
+    return response.data as string
   },
 }
 

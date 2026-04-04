@@ -321,19 +321,16 @@ export const OperationsPage: React.FC = () => {
 
     try {
       const cartridgeIds = lastSentCartridges.map(c => c.id)
-      const blob = await operationApi.generateAct(cartridgeIds)
-      
-      // Создаем URL для blob и открываем в новой вкладке
-      const url = URL.createObjectURL(blob)
-      const newWindow = window.open(url, '_blank')
-      
+      const htmlContent = await operationApi.generateAct(cartridgeIds)
+
+      // Открываем HTML в новой вкладке
+      const newWindow = window.open('', '_blank')
       if (newWindow) {
-        // Ждем загрузки контента и применяем стили для печати
-        newWindow.onload = () => {
-          URL.revokeObjectURL(url)
-        }
+        newWindow.document.open()
+        newWindow.document.write(htmlContent)
+        newWindow.document.close()
       }
-      
+
       addToast('Акт сгенерирован и открыт в новой вкладке', 'success')
     } catch (err: any) {
       addToast(`Ошибка при генерации акта: ${err.message}`, 'error')

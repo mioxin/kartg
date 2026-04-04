@@ -2,11 +2,36 @@ import React, { useState } from 'react'
 import { useCartridgeStore } from '../store/cartridgeStore'
 import { analyticsApi, downloadFile } from '../api/api'
 
+// Форматирование даты в YYYY-MM-DD
+const formatDate = (date: Date): string => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+// Получение начальной даты текущего месяца
+const getStartOfMonth = (): string => {
+  const now = new Date()
+  return formatDate(new Date(now.getFullYear(), now.getMonth(), 1))
+}
+
+// Получение текущей даты
+const getToday = (): string => {
+  return formatDate(new Date())
+}
+
+const getEndOfDayISOString = (dateString: string): string => {
+  const [year, month, day] = dateString.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999))
+  return date.toISOString()
+}
+
 export const AnalyticsPage: React.FC = () => {
   const { globalStats, fetchGlobalStats } = useCartridgeStore()
   const [refillsStats, setRefillsStats] = useState<{ totalRefills: number; uniqueCartridges: number } | null>(null)
-  const [periodStart, setPeriodStart] = useState('')
-  const [periodEnd, setPeriodEnd] = useState('')
+  const [periodStart, setPeriodStart] = useState(getStartOfMonth)
+  const [periodEnd, setPeriodEnd] = useState(getToday)
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState<'csv' | 'txt' | null>(null)
 
@@ -20,9 +45,13 @@ export const AnalyticsPage: React.FC = () => {
     try {
       const stats = await analyticsApi.getRefillsStats(
         new Date(periodStart).toISOString(),
-        new Date(periodEnd).toISOString()
+        getEndOfDayISOString(periodEnd)
       )
-      setRefillsStats(stats)
+      
+      setRefillsStats({
+        totalRefills: stats.totalRefills,
+        uniqueCartridges: stats.uniqueCartridges,
+      })
     } catch (err) {
       console.error('Ошибка при загрузке статистики:', err)
     } finally {

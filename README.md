@@ -266,6 +266,15 @@ npm install
 npm run dev
 ```
 
+### Генерация protobuf файлов
+
+Если вы изменяете `.proto` файлы, сгенерируйте Go код:
+
+```bash
+make install-tools  # Установка protoc плагинов (один раз)
+make gen            # Генерация Go кода из api/proto/service.proto
+```
+
 ### Тестирование
 ```bash
 go test ./...
