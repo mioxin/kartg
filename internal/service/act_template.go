@@ -83,10 +83,10 @@ type TypeBreakdown struct {
 }
 
 type ActData struct {
-	Cartridges   []models.Cartridge
-	TotalCount   int
+	Cartridges    []models.Cartridge
+	TotalCount    int
 	TypeBreakdown []TypeBreakdown
-	Date         string
+	Date          string
 }
 
 var actTemplate *template.Template
