@@ -21,7 +21,7 @@ export const OperationsPage: React.FC = () => {
   const [pendingId, setPendingId] = useState('')
   const [loading, setLoading] = useState(false)
   const [processingId, setProcessingId] = useState<string | null>(null)
-  const [allSentCartridgesHistory, setAllSentCartridgesHistory] = useState<CartridgeItem[]>([])
+  const [refillActCount, setRefillActCount] = useState<number>(0)
 
   // Групповой ввод
   const [showBulkRegisterModal, setShowBulkRegisterModal] = useState(false)
@@ -59,10 +59,10 @@ export const OperationsPage: React.FC = () => {
     inputRef.current?.focus()
   }, [])
 
-  // Загрузка моделей и истории отправок при монтировании
+  // Загрузка моделей и количества картриджей на заправке при монтировании
   useEffect(() => {
     loadModels()
-    loadSentHistory()
+    loadRefillActCount()
   }, [])
 
   // Закрытие подсказок при клике вне
@@ -91,25 +91,12 @@ export const OperationsPage: React.FC = () => {
     }
   }
 
-  // Загрузка истории отправленных картриджей из localStorage
-  const loadSentHistory = () => {
+  const loadRefillActCount = async () => {
     try {
-      const history = localStorage.getItem('kartg_sent_history')
-      if (history) {
-        const parsedHistory = JSON.parse(history)
-        setAllSentCartridgesHistory(parsedHistory)
-      }
+      const response = await cartridgeApi.list(1, 1, '', 'CARTRIDGE_STATUS_REFILLING')
+      setRefillActCount(response.totalCount)
     } catch (err) {
-      console.error('Ошибка при загрузке истории отправок:', err)
-    }
-  }
-
-  // Сохранение истории отправленных картриджей в localStorage
-  const saveSentHistory = (history: CartridgeItem[]) => {
-    try {
-      localStorage.setItem('kartg_sent_history', JSON.stringify(history))
-    } catch (err) {
-      console.error('Ошибка при сохранении истории отправок:', err)
+      console.error('Ошибка при загрузке количества картриджей на заправке:', err)
     }
   }
 
@@ -413,30 +400,17 @@ export const OperationsPage: React.FC = () => {
     setCurrentList(currentList.filter(c => !processedIds.includes(c.id)))
 
     setLoading(false)
-
-    // Сохраняем отправленные картриджи для акта и добавляем в историю
-    if (operationType === 'send' && sentCartridges.length > 0) {
-      // Добавляем в общую историю всех отправленных картриджей
-      const updatedHistory = [...allSentCartridgesHistory, ...sentCartridges]
-      setAllSentCartridgesHistory(updatedHistory)
-      saveSentHistory(updatedHistory)
-      addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}. Акт готов к печати.`, errorCount > 0 ? 'error' : 'success')
-    } else if (successCount > 0) {
-      addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}`, errorCount > 0 ? 'error' : 'success')
+    if (successCount > 0) {
+      addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}${operationType === 'send' ? '. Акт можно получить из общей истории.' : ''}`, errorCount > 0 ? 'error' : 'success')
     }
+
+    await loadRefillActCount()
   }
 
   // Генерация и открытие акта
   const handleGenerateAct = async () => {
-    if (allSentCartridgesHistory.length === 0) {
-      addToast('Нет отправленных на заправку картриджей для генерации акта', 'error')
-      return
-    }
-
     try {
-      // Используем всю историю отправленных картриджей для генерации акта
-      const cartridgeIds = allSentCartridgesHistory.map(c => c.id)
-      const htmlContent = await operationApi.generateAct(cartridgeIds)
+      const htmlContent = await operationApi.generateAct()
 
       // Открываем HTML в новой вкладке
       const newWindow = window.open('', '_blank')
@@ -754,7 +728,7 @@ export const OperationsPage: React.FC = () => {
               >
                 <span className="flex items-center">
                   <span className="mr-2">📄</span>
-                  Акт выдачи ({allSentCartridgesHistory.length > 0 ? `всего ${allSentCartridgesHistory.length}` : 'нет отправок'})
+                  Акт выдачи ({refillActCount > 0 ? `всего ${refillActCount}` : 'нет отправок'})
                 </span>
               </button>
             )}

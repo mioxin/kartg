@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -40,7 +41,7 @@ type Gateway struct {
 // ServeHTTP реализует интерфейс http.Handler
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.handler == nil {
-		g.handler = i18n.LanguageMiddleware(withCORS(g.mux))
+		g.handler = i18n.LanguageMiddleware(withCORS(withAuthMetadata(g.mux)))
 	}
 	g.handler.ServeHTTP(w, r)
 }
@@ -140,7 +141,7 @@ func (g *Gateway) registerHandlers(ctx context.Context) error {
 
 // Start запускает HTTP сервер
 func (g *Gateway) Start() error {
-	handler := i18n.LanguageMiddleware(withCORS(g.mux))
+	handler := i18n.LanguageMiddleware(withCORS(withAuthMetadata(g.mux)))
 
 	g.logger.Info("HTTP Gateway started",
 		"address", g.config.HTTPAddress,
@@ -368,6 +369,23 @@ func withCORS(handler http.Handler) http.Handler {
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
+		}
+
+		handler.ServeHTTP(w, r)
+	})
+}
+
+// withAuthMetadata добавляет HTTP заголовки авторизации в gRPC metadata
+func withAuthMetadata(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Получаем токен из HTTP заголовка
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			// Добавляем в контекст для передачи в gRPC
+			ctx := r.Context()
+			md := metadata.Pairs("authorization", authHeader)
+			ctx = metadata.NewOutgoingContext(ctx, md)
+			r = r.WithContext(ctx)
 		}
 
 		handler.ServeHTTP(w, r)

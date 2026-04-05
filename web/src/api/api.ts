@@ -9,6 +9,20 @@ export const api = axios.create({
   },
 })
 
+// Request interceptor для добавления токена в Authorization header
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
 // Карtridge API
 export interface Cartridge {
   id: string
@@ -69,7 +83,7 @@ export const operationApi = {
     return response.data
   },
 
-  generateAct: async (cartridgeIds: string[]): Promise<string> => {
+  generateAct: async (cartridgeIds: string[] = []): Promise<string> => {
     const response = await api.post('/operations/generate-act', { cartridge_ids: cartridgeIds })
     return response.data as string
   },

@@ -16,9 +16,9 @@ import (
 
 // publicMethods список методов, не требующих аутентификации
 var publicMethods = map[string]bool{
-	"/kartg.api.HealthService/Check":       true,
-	"/kartg.api.AuthService/Login":         true,
-	"/kartg.api.AuthService/RegisterUser":  true,
+	"/kartg.api.HealthService/Check":      true,
+	"/kartg.api.AuthService/Login":        true,
+	"/kartg.api.AuthService/RegisterUser": true,
 }
 
 // LoggingInterceptor логирует каждый gRPC вызов
@@ -63,7 +63,11 @@ func AuthInterceptor(jwtSecret []byte) grpc.UnaryServerInterceptor {
 		// Ищем токен в Authorization header
 		tokenValues := md.Get("authorization")
 		if len(tokenValues) == 0 {
-			return nil, status.Errorf(codes.Unauthenticated, "отсутствует токен авторизации")
+			// Попробуем lowercase
+			tokenValues = md.Get("Authorization")
+			if len(tokenValues) == 0 {
+				return nil, status.Errorf(codes.Unauthenticated, "отсутствует токен авторизации")
+			}
 		}
 
 		tokenString := strings.TrimPrefix(tokenValues[0], "Bearer ")
