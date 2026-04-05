@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -376,6 +377,16 @@ func NewOperationServiceServer(db *gorm.DB) *OperationServiceServer {
 func (s *OperationServiceServer) SendToRefill(ctx context.Context, req *proto.SendToRefillRequest) (*proto.Cartridge, error) {
 	slog.Info("Отправка на заправку", "cartridge_id", req.CartridgeId, "comment", req.Comment)
 
+	// Проверяем отмену контекста
+	if err := ctx.Err(); err != nil {
+		return nil, status.Error(codes.DeadlineExceeded, "запрос отменён")
+	}
+
+	// Валидация комментария
+	if len(req.Comment) > 500 {
+		return nil, status.Errorf(codes.InvalidArgument, "комментарий слишком длинный (максимум 500 символов)")
+	}
+
 	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
 	if err != nil {
 		return nil, err
@@ -415,6 +426,16 @@ func (s *OperationServiceServer) SendToRefill(ctx context.Context, req *proto.Se
 // ReceiveFromRefill принимает картридж с заправки
 func (s *OperationServiceServer) ReceiveFromRefill(ctx context.Context, req *proto.ReceiveFromRefillRequest) (*proto.Cartridge, error) {
 	slog.Info("Прием с заправки", "cartridge_id", req.CartridgeId, "comment", req.Comment)
+
+	// Проверяем отмену контекста
+	if err := ctx.Err(); err != nil {
+		return nil, status.Error(codes.DeadlineExceeded, "запрос отменён")
+	}
+
+	// Валидация комментария
+	if len(req.Comment) > 500 {
+		return nil, status.Errorf(codes.InvalidArgument, "комментарий слишком длинный (максимум 500 символов)")
+	}
 
 	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
 	if err != nil {
@@ -461,6 +482,16 @@ func (s *OperationServiceServer) ReceiveFromRefill(ctx context.Context, req *pro
 // RetireCartridge утилизирует картридж
 func (s *OperationServiceServer) RetireCartridge(ctx context.Context, req *proto.RetireCartridgeRequest) (*proto.Cartridge, error) {
 	slog.Info("Утилизация картриджа", "cartridge_id", req.CartridgeId, "comment", req.Comment)
+
+	// Проверяем отмену контекста
+	if err := ctx.Err(); err != nil {
+		return nil, status.Error(codes.DeadlineExceeded, "запрос отменён")
+	}
+
+	// Валидация комментария
+	if len(req.Comment) > 500 {
+		return nil, status.Errorf(codes.InvalidArgument, "комментарий слишком длинный (максимум 500 символов)")
+	}
 
 	cartridge, err := getCartridgeByID(s.db, req.CartridgeId)
 	if err != nil {
@@ -526,26 +557,43 @@ func (s *OperationServiceServer) GetCartridgeHistory(ctx context.Context, req *p
 
 // GenerateAct генерирует акт выдачи картриджей на заправку
 func (s *OperationServiceServer) GenerateAct(ctx context.Context, req *proto.GenerateActRequest) (*wrapperspb.BytesValue, error) {
-	if len(req.CartridgeIds) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "список картриджей не может быть пустым")
-	}
-
-	slog.Info("Генерация акта выдачи", "cartridge_count", len(req.CartridgeIds))
-
-	// Получаем картриджи из БД
 	var cartridges []models.Cartridge
-	result := s.db.Where("id IN ?", req.CartridgeIds).Find(&cartridges)
+	var ids []string
 
-	if result.Error != nil {
-		return nil, status.Errorf(codes.Internal, "ошибка при получении картриджей: %v", result.Error)
+	if len(req.CartridgeIds) == 0 {
+		// Генерируем акт для всех картриджей, которые сейчас находятся на заправке
+		if err := s.db.Where("status = ?", models.CartridgeStatusRefilling).Find(&cartridges).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "ошибка при получении картриджей: %v", err)
+		}
+		if len(cartridges) == 0 {
+			return nil, status.Errorf(codes.NotFound, "нет картриджей на заправке для генерации акта")
+		}
+		ids = make([]string, len(cartridges))
+		for i, c := range cartridges {
+			ids[i] = c.ID
+		}
+	} else {
+		ids = req.CartridgeIds
+		if err := s.db.Where("id IN ?", ids).Find(&cartridges).Error; err != nil {
+			return nil, status.Errorf(codes.Internal, "ошибка при получении картриджей: %v", err)
+		}
+		if len(cartridges) != len(ids) {
+			return nil, status.Errorf(codes.NotFound, "не все картриджи найдены")
+		}
 	}
 
-	if len(cartridges) != len(req.CartridgeIds) {
-		return nil, status.Errorf(codes.NotFound, "не все картриджи найдены")
+	slog.Info("Генерация акта выдачи", "cartridge_count", len(ids))
+
+	var latestSend models.Transaction
+	if err := s.db.Where("cartridge_id IN ? AND type = ?", ids, models.OperationTypeSendToRefill).
+		Order("timestamp DESC").First(&latestSend).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, status.Errorf(codes.NotFound, "нет записей отправки на заправку для выбранных картриджей")
+		}
+		return nil, status.Errorf(codes.Internal, "ошибка при получении даты отправки: %v", err)
 	}
 
-	// Генерируем HTML контент акта
-	content := generateActHTML(cartridges)
+	content := generateActHTML(cartridges, latestSend.Timestamp.Format("02.01.2006"))
 
 	return &wrapperspb.BytesValue{Value: []byte(content)}, nil
 }

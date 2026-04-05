@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/gorm"
 
@@ -242,9 +243,6 @@ func initDefaultUsers(db *gorm.DB, adminPassword string) error {
 
 // runServers запускает gRPC и HTTP серверы
 func runServers(ctx context.Context, cfg *Config, db *gorm.DB) (<-chan error, <-chan error, func(), error) {
-	// Создаем gRPC сервер
-	grpcServer := grpc.NewServer()
-
 	// Создаем сервис авторизации с безопасным JWT secret
 	authService := service.NewAuthServiceServer(service.AuthConfig{
 		DB:         db,
@@ -255,6 +253,19 @@ func runServers(ctx context.Context, cfg *Config, db *gorm.DB) (<-chan error, <-
 	// Создаем репозиторий для соблюдения DIP
 	cartridgeRepo := service.NewGORMRepository(db)
 
+	// Создаем gRPC сервер с interceptors и keepalive
+	grpcServer := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			service.LoggingInterceptor,
+			service.AuthInterceptor([]byte(cfg.JWTSecret)),
+			service.RecoveryInterceptor,
+		),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second, // Ping interval for idle connections
+			Timeout: 10 * time.Second, // Ping ack timeout
+		}),
+	)
+
 	// Регистрируем сервисы
 	proto.RegisterCartridgeServiceServer(grpcServer, service.NewCartridgeServiceServer(cartridgeRepo))
 	proto.RegisterOperationServiceServer(grpcServer, service.NewOperationServiceServer(db))
@@ -263,8 +274,13 @@ func runServers(ctx context.Context, cfg *Config, db *gorm.DB) (<-chan error, <-
 	proto.RegisterAuthServiceServer(grpcServer, authService)
 	proto.RegisterModelServiceServer(grpcServer, service.NewModelServiceServer(db))
 
-	// Включаем reflection для отладки
-	reflection.Register(grpcServer)
+	// Включаем reflection только для отладки (не в production)
+	if os.Getenv("KARTG_ENV") != "production" {
+		reflection.Register(grpcServer)
+		slog.Info("gRPC reflection enabled (development mode)")
+	} else {
+		slog.Info("gRPC reflection disabled (production mode)")
+	}
 
 	// Запускаем gRPC сервер
 	grpcAddr := ":" + cfg.GRPCPort

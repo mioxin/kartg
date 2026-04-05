@@ -476,9 +476,13 @@ func TestOperationService_GenerateAct(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Не удалось зарегистрировать картридж %s: %v", id, err)
 		}
+		_, err = operationSvc.SendToRefill(ctx, &proto.SendToRefillRequest{CartridgeId: id, Comment: "test"})
+		if err != nil {
+			t.Fatalf("Не удалось отправить картридж %s на заправку: %v", id, err)
+		}
 	}
 
-	resp, err := operationSvc.GenerateAct(ctx, &proto.GenerateActRequest{CartridgeIds: ids})
+	resp, err := operationSvc.GenerateAct(ctx, &proto.GenerateActRequest{})
 	if err != nil {
 		t.Fatalf("Не удалось сгенерировать акт: %v", err)
 	}
@@ -491,6 +495,16 @@ func TestOperationService_GenerateAct(t *testing.T) {
 		if !contains(content, id) {
 			t.Errorf("Ожидался акт содержащий ID %s", id)
 		}
+	}
+
+	var latestSend models.Transaction
+	if err := testDB.Where("cartridge_id IN ? AND type = ?", ids, models.OperationTypeSendToRefill).
+		Order("timestamp DESC").First(&latestSend).Error; err != nil {
+		t.Fatalf("Не удалось получить дату отправки из БД: %v", err)
+	}
+
+	if !contains(content, latestSend.Timestamp.Format("02.01.2006")) {
+		t.Errorf("Ожидался акт с датой последней отправки из БД, получено: %s", content)
 	}
 }
 

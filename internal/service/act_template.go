@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"sort"
 	"text/template"
-	"time"
 
 	"github.com/mioxin/kartg/internal/models"
 )
@@ -101,7 +100,7 @@ func init() {
 	actTemplate = template.Must(template.New("act").Funcs(funcMap).Parse(actTemplateText))
 }
 
-func generateActHTML(cartridges []models.Cartridge) string {
+func generateActHTML(cartridges []models.Cartridge, date string) string {
 	// Подсчёт по типам
 	typeCount := make(map[string]int)
 	for _, c := range cartridges {
@@ -131,7 +130,7 @@ func generateActHTML(cartridges []models.Cartridge) string {
 		Cartridges:    cartridges,
 		TotalCount:    len(cartridges),
 		TypeBreakdown: typeBreakdown,
-		Date:          time.Now().Format("02.01.2006"),
+		Date:          date,
 	}
 
 	var buf bytes.Buffer

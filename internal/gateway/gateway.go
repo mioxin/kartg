@@ -13,7 +13,9 @@ import (
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/mioxin/kartg/api/proto"
@@ -294,7 +296,17 @@ func (g *Gateway) handleGenerateAct() func(http.ResponseWriter, *http.Request, m
 		resp, err := g.clientPool.operationClient.GenerateAct(ctx, &req)
 		if err != nil {
 			g.logger.Error("Generate act failed", "error", err)
-			g.sendError(w, "generate_act.error", http.StatusInternalServerError)
+			st, _ := status.FromError(err)
+			switch st.Code() {
+			case codes.InvalidArgument:
+				g.sendError(w, st.Message(), http.StatusBadRequest)
+			case codes.NotFound:
+				g.sendError(w, st.Message(), http.StatusNotFound)
+			case codes.FailedPrecondition:
+				g.sendError(w, st.Message(), http.StatusConflict)
+			default:
+				g.sendError(w, st.Message(), http.StatusInternalServerError)
+			}
 			return
 		}
 
