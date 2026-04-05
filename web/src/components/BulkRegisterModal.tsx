@@ -111,3 +111,5 @@ export const BulkRegisterModal: React.FC<BulkRegisterModalProps> = ({
     </div>
   )
 }
+
+export default BulkRegisterModal

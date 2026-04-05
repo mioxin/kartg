@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useCartridgeStore } from '../store/cartridgeStore'
 import { modelApi, ModelItem, operationApi, cartridgeApi } from '../api/api'
-import { BulkRegisterModal, CartridgeToRegister } from '../components/BulkRegisterModal'
+import BulkRegisterModal, { CartridgeToRegister } from '../components/BulkRegisterModal.tsx'
 
 type OperationType = 'send' | 'receive' | 'retire'
 
@@ -24,7 +24,6 @@ export const OperationsPage: React.FC = () => {
   const [lastSentCartridges, setLastSentCartridges] = useState<CartridgeItem[]>([])
 
   // Групповой ввод
-  const [bulkInput, setBulkInput] = useState('')
   const [showBulkRegisterModal, setShowBulkRegisterModal] = useState(false)
   const [bulkCartridgesToRegister, setBulkCartridgesToRegister] = useState<CartridgeToRegister[]>([])
   const [bulkRegisterLoading, setBulkRegisterLoading] = useState(false)
@@ -110,59 +109,6 @@ export const OperationsPage: React.FC = () => {
       .filter(id => id.length > 0)
   }
 
-  // Обработка группового ввода
-  const handleBulkImport = async () => {
-    const cartridgeIds = parseBulkInput(bulkInput)
-    
-    if (cartridgeIds.length === 0) {
-      addToast('Введите ID картриджей', 'error')
-      return
-    }
-
-    // Проверяем, нет ли дублей в текущем списке
-    const duplicates = cartridgeIds.filter(id => currentList.some(c => c.id === id))
-    if (duplicates.length > 0) {
-      addToast(`Картриджи уже в списке: ${duplicates.join(', ')}`, 'error')
-      return
-    }
-
-    // Проверяем какие картриджи существуют
-    const validCartridges: CartridgeItem[] = []
-    const notFoundIds: string[] = []
-
-    for (const id of cartridgeIds) {
-      try {
-        const cartridge = await getCartridge(id)
-        const validity = checkOperationValidity(cartridge, operationType)
-        if (validity.valid) {
-          validCartridges.push({
-            id: cartridge.id,
-            status: cartridge.status,
-            model: cartridge.model,
-          })
-        } else {
-          addToast(validity.message || `Операция для ${id} невозможна`, 'error')
-        }
-      } catch (err) {
-        notFoundIds.push(id)
-      }
-    }
-
-    // Добавляем найденные картриджи
-    if (validCartridges.length > 0) {
-      setCurrentList([...currentList, ...validCartridges])
-    }
-
-    // Если есть не найденные - показываем модальное окно регистрации
-    if (notFoundIds.length > 0) {
-      setBulkCartridgesToRegister(notFoundIds.map(id => ({ id, model: '' })))
-      setShowBulkRegisterModal(true)
-    } else {
-      setBulkInput('')
-      addToast(`Добавлено ${validCartridges.length} картриджей`, 'success')
-    }
-  }
-
   // Регистрация множества картриджей
   const handleBulkRegister = async (cartridges: CartridgeToRegister[]) => {
     setBulkRegisterLoading(true)
@@ -204,7 +150,7 @@ export const OperationsPage: React.FC = () => {
       }
 
       setShowBulkRegisterModal(false)
-      setBulkInput('')
+      setInputId('')
       setBulkCartridgesToRegister([])
     } catch (err: any) {
       console.error('Ошибка при массовой регистрации:', err)
@@ -261,44 +207,66 @@ export const OperationsPage: React.FC = () => {
     return { valid: true }
   }
 
-  // Добавление картриджа в список
+  // Добавление картриджей (одиночных или групповых)
   const handleAddCartridge = async () => {
-    const id = inputId.trim().toUpperCase()
+    const input = inputId.trim()
     
-    if (!id) {
-      addToast('Введите ID картриджа', 'error')
+    if (!input) {
+      addToast('Введите ID картриджей', 'error')
       return
     }
 
-    // Проверяем, нет ли уже такого в текущем списке
-    if (currentList.some(c => c.id === id)) {
-      addToast(`Картридж ${id} уже в списке`, 'error')
+    // Парсим ввод - может быть один ID или несколько через разделители
+    const cartridgeIds = parseBulkInput(input)
+    
+    if (cartridgeIds.length === 0) {
+      addToast('Введите корректные ID картриджей', 'error')
       return
     }
 
-    try {
-      // Пробуем получить информацию о картридже
-      const cartridge = await getCartridge(id)
-      
-      // Проверяем корректность операции для этого картриджа
-      const validity = checkOperationValidity(cartridge, operationType)
-      if (!validity.valid) {
-        addToast(validity.message || 'Операция невозможна', 'error')
-        return
+    // Проверяем, нет ли дублей в текущем списке
+    const duplicates = cartridgeIds.filter(id => currentList.some(c => c.id === id))
+    if (duplicates.length > 0) {
+      addToast(`Картриджи уже в списке: ${duplicates.join(', ')}`, 'error')
+      return
+    }
+
+    // Проверяем какие картриджи существуют
+    const validCartridges: CartridgeItem[] = []
+    const notFoundIds: string[] = []
+
+    for (const id of cartridgeIds) {
+      try {
+        const cartridge = await getCartridge(id)
+        const validity = checkOperationValidity(cartridge, operationType)
+        if (validity.valid) {
+          validCartridges.push({
+            id: cartridge.id,
+            status: cartridge.status,
+            model: cartridge.model,
+          })
+        } else {
+          addToast(validity.message || `Операция для ${id} невозможна`, 'error')
+        }
+      } catch (err) {
+        notFoundIds.push(id)
       }
-      
-      setCurrentList([...currentList, { 
-        id: cartridge.id, 
-        status: cartridge.status,
-        model: cartridge.model 
-      }])
-      setInputId('') // Очищаем поле ввода
-      inputRef.current?.focus() // Возвращаем фокус
-    } catch (err: any) {
-      // Картридж не найден - предлагаем зарегистрировать
-      setPendingId(id)
-      setInputModel('')
-      setShowModelInput(true)
+    }
+
+    // Добавляем найденные картриджи
+    if (validCartridges.length > 0) {
+      setCurrentList([...currentList, ...validCartridges])
+    }
+
+    // Если есть не найденные - показываем модальное окно регистрации
+    if (notFoundIds.length > 0) {
+      setBulkCartridgesToRegister(notFoundIds.map(id => ({ id, model: '' })))
+      setShowBulkRegisterModal(true)
+    } else {
+      setInputId('')
+      const count = validCartridges.length
+      addToast(`Добавлено ${count} картридж${count === 1 ? '' : count < 5 ? 'а' : 'ей'}`, 'success')
+      inputRef.current?.focus()
     }
   }
 
@@ -336,6 +304,7 @@ export const OperationsPage: React.FC = () => {
     setShowModelInput(false)
     setPendingId('')
     setInputModel('')
+    setInputId('')
     inputRef.current?.focus()
   }
 
@@ -513,16 +482,6 @@ export const OperationsPage: React.FC = () => {
     }
   }
 
-  // Получить цвет границы таба по типу операции
-  const getTabBorderColor = () => {
-    const colorMap = {
-      yellow: 'border-yellow-500',
-      green: 'border-green-500',
-      red: 'border-red-500',
-    }
-    return colorMap[currentOp.color as keyof typeof colorMap]
-  }
-
   // Получить цвет границы формы по типу операции
   const getFormBorderColor = () => {
     const colorMap = {
@@ -563,37 +522,10 @@ export const OperationsPage: React.FC = () => {
               <p className="text-sm text-gray-600">{currentOp.description}</p>
             </div>
 
-            {/* Табы для выбора режима ввода */}
-            <div className="mb-4 flex border-b border-gray-200">
-              <button
-                type="button"
-                onClick={() => setBulkInput('')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  !bulkInput
-                    ? `${getTabBorderColor()} ${currentColors.text}`
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📝 Одиночный ввод
-              </button>
-              <button
-                type="button"
-                onClick={() => setInputId('')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  bulkInput !== ''
-                    ? `${getTabBorderColor()} ${currentColors.text}`
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                📋 Групповой ввод
-              </button>
-            </div>
-
-            {/* Одиночный ввод ID */}
-            {!bulkInput && (
+            {/* Универсальный ввод ID картриджей */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Введите ID картриджа
+                Введите ID картриджей
               </label>
               <div className="flex space-x-2">
                 <input
@@ -602,7 +534,7 @@ export const OperationsPage: React.FC = () => {
                   value={inputId}
                   onChange={(e) => setInputId(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Например: CART-001"
+                  placeholder="Например: CART-001 или CART-001, CART-002; CART-003"
                   className={`flex-1 px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${currentColors.ring} uppercase`}
                   autoComplete="off"
                   disabled={loading || showModelInput}
@@ -616,36 +548,10 @@ export const OperationsPage: React.FC = () => {
                   Добавить
                 </button>
               </div>
-              <p className="mt-1 text-xs text-gray-500">Нажмите Enter или кнопку "Добавить"</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Введите один или несколько ID через запятую, точку с запятой или пробел. Нажмите Enter или кнопку "Добавить"
+              </p>
             </div>
-            )}
-
-            {/* Групповой ввод ID */}
-            {bulkInput !== '' && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Введите ID картриджей (через запятую, точку, точку с запятой или пробел)
-              </label>
-              <textarea
-                value={bulkInput}
-                onChange={(e) => setBulkInput(e.target.value)}
-                placeholder="Например: CART-001, CART-002; CART-003 CART-004"
-                rows={4}
-                className={`w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 ${currentColors.ring} font-mono text-sm uppercase`}
-                autoComplete="off"
-                disabled={loading}
-              />
-              <p className="mt-1 text-xs text-gray-500">Разделители: запятая (,), точка (.), точка с запятой (;), пробел</p>
-              <button
-                type="button"
-                onClick={handleBulkImport}
-                disabled={loading || !bulkInput.trim()}
-                className={`mt-3 px-6 py-3 w-full ${currentColors.bg} text-white rounded-md ${currentColors.hover} font-medium disabled:opacity-50 transition-colors`}
-              >
-                {loading ? 'Обработка...' : '📋 Импортировать группу'}
-              </button>
-            </div>
-            )}
 
             {/* Форма регистрации нового картриджа */}
             {showModelInput && (
@@ -844,8 +750,8 @@ export const OperationsPage: React.FC = () => {
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h4 className="text-sm font-medium text-blue-900 mb-2">💡 Подсказка</h4>
           <ul className="text-sm text-blue-700 space-y-1">
-            <li>• Вводите ID картриджей по одному и нажимайте Enter для добавления в список</li>
-            <li>• Можно добавить несколько картриджей для массовой операции</li>
+            <li>• Введите один или несколько ID картриджей через запятую, точку с запятой или пробел</li>
+            <li>• Не найденные картриджи можно зарегистрировать в модальном окне</li>
             <li>• При приеме с заправки счетчик заправок увеличивается автоматически</li>
           </ul>
         </div>
