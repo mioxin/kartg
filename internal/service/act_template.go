@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"sort"
 	"text/template"
 	"time"
 
@@ -111,19 +112,26 @@ func generateActHTML(cartridges []models.Cartridge) string {
 		}
 	}
 
+	// Сортируем типы для гарантированного порядка
+	var sortedModelTypes []string
+	for modelType := range typeCount {
+		sortedModelTypes = append(sortedModelTypes, modelType)
+	}
+	sort.Strings(sortedModelTypes)
+
 	var typeBreakdown []TypeBreakdown
-	for modelType, count := range typeCount {
+	for _, modelType := range sortedModelTypes {
 		typeBreakdown = append(typeBreakdown, TypeBreakdown{
 			ModelType: modelType,
-			Count:     count,
+			Count:     typeCount[modelType],
 		})
 	}
 
 	data := ActData{
-		Cartridges:   cartridges,
-		TotalCount:   len(cartridges),
+		Cartridges:    cartridges,
+		TotalCount:    len(cartridges),
 		TypeBreakdown: typeBreakdown,
-		Date:         time.Now().Format("02.01.2006"),
+		Date:          time.Now().Format("02.01.2006"),
 	}
 
 	var buf bytes.Buffer
