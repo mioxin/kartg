@@ -21,7 +21,7 @@ export const OperationsPage: React.FC = () => {
   const [pendingId, setPendingId] = useState('')
   const [loading, setLoading] = useState(false)
   const [processingId, setProcessingId] = useState<string | null>(null)
-  const [lastSentCartridges, setLastSentCartridges] = useState<CartridgeItem[]>([])
+  const [allSentCartridgesHistory, setAllSentCartridgesHistory] = useState<CartridgeItem[]>([])
 
   // Групповой ввод
   const [showBulkRegisterModal, setShowBulkRegisterModal] = useState(false)
@@ -59,9 +59,10 @@ export const OperationsPage: React.FC = () => {
     inputRef.current?.focus()
   }, [])
 
-  // Загрузка моделей при монтировании
+  // Загрузка моделей и истории отправок при монтировании
   useEffect(() => {
     loadModels()
+    loadSentHistory()
   }, [])
 
   // Закрытие подсказок при клике вне
@@ -87,6 +88,28 @@ export const OperationsPage: React.FC = () => {
       setModels(response.models)
     } catch (err) {
       console.error('Ошибка при загрузке моделей:', err)
+    }
+  }
+
+  // Загрузка истории отправленных картриджей из localStorage
+  const loadSentHistory = () => {
+    try {
+      const history = localStorage.getItem('kartg_sent_history')
+      if (history) {
+        const parsedHistory = JSON.parse(history)
+        setAllSentCartridgesHistory(parsedHistory)
+      }
+    } catch (err) {
+      console.error('Ошибка при загрузке истории отправок:', err)
+    }
+  }
+
+  // Сохранение истории отправленных картриджей в localStorage
+  const saveSentHistory = (history: CartridgeItem[]) => {
+    try {
+      localStorage.setItem('kartg_sent_history', JSON.stringify(history))
+    } catch (err) {
+      console.error('Ошибка при сохранении истории отправок:', err)
     }
   }
 
@@ -166,7 +189,6 @@ export const OperationsPage: React.FC = () => {
     setInputModel('')
     setShowModelInput(false)
     setPendingId('')
-    setLastSentCartridges([]) // Сбрасываем список отправленных картриджей
   }, [operationType])
 
   // Фокус на поле модели при показе
@@ -392,9 +414,12 @@ export const OperationsPage: React.FC = () => {
 
     setLoading(false)
 
-    // Сохраняем отправленные картриджи для акта
+    // Сохраняем отправленные картриджи для акта и добавляем в историю
     if (operationType === 'send' && sentCartridges.length > 0) {
-      setLastSentCartridges(sentCartridges)
+      // Добавляем в общую историю всех отправленных картриджей
+      const updatedHistory = [...allSentCartridgesHistory, ...sentCartridges]
+      setAllSentCartridgesHistory(updatedHistory)
+      saveSentHistory(updatedHistory)
       addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}. Акт готов к печати.`, errorCount > 0 ? 'error' : 'success')
     } else if (successCount > 0) {
       addToast(`${currentOp.label}: выполнено ${successCount}, ошибок ${errorCount}`, errorCount > 0 ? 'error' : 'success')
@@ -403,13 +428,14 @@ export const OperationsPage: React.FC = () => {
 
   // Генерация и открытие акта
   const handleGenerateAct = async () => {
-    if (lastSentCartridges.length === 0) {
-      addToast('Нет картриджей для генерации акта', 'error')
+    if (allSentCartridgesHistory.length === 0) {
+      addToast('Нет отправленных на заправку картриджей для генерации акта', 'error')
       return
     }
 
     try {
-      const cartridgeIds = lastSentCartridges.map(c => c.id)
+      // Используем всю историю отправленных картриджей для генерации акта
+      const cartridgeIds = allSentCartridgesHistory.map(c => c.id)
       const htmlContent = await operationApi.generateAct(cartridgeIds)
 
       // Открываем HTML в новой вкладке
@@ -719,8 +745,8 @@ export const OperationsPage: React.FC = () => {
               )}
             </button>
 
-            {/* Кнопка генерации акта - только для операции отправки на заправку */}
-            {operationType === 'send' && lastSentCartridges.length > 0 && (
+            {/* Кнопка генерации акта - всегда активна для операции отправки */}
+            {operationType === 'send' && (
               <button
                 type="button"
                 onClick={handleGenerateAct}
@@ -728,7 +754,7 @@ export const OperationsPage: React.FC = () => {
               >
                 <span className="flex items-center">
                   <span className="mr-2">📄</span>
-                  Акт выдачи ({lastSentCartridges.length})
+                  Акт выдачи ({allSentCartridgesHistory.length > 0 ? `всего ${allSentCartridgesHistory.length}` : 'нет отправок'})
                 </span>
               </button>
             )}
@@ -753,6 +779,7 @@ export const OperationsPage: React.FC = () => {
             <li>• Введите один или несколько ID картриджей через запятую, точку с запятой или пробел</li>
             <li>• Не найденные картриджи можно зарегистрировать в модальном окне</li>
             <li>• При приеме с заправки счетчик заправок увеличивается автоматически</li>
+            <li>• Кнопка "Акт выдачи" всегда доступна для операций выдачи и включает историю всех отправленных картриджей</li>
           </ul>
         </div>
       </div>
