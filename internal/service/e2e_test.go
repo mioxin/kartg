@@ -24,7 +24,7 @@ func TestE2E_FullCartridgeLifecycle(t *testing.T) {
 	}
 
 	// Миграция
-	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}); err != nil {
+	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.CartridgeModel{}); err != nil {
 		t.Fatalf("Ошибка миграции: %v", err)
 	}
 

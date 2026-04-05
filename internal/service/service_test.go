@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/mioxin/kartg/api/proto"
 	"github.com/mioxin/kartg/internal/database"
 	"github.com/mioxin/kartg/internal/models"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
 
@@ -27,7 +29,7 @@ func setupTestDB(t *testing.T) {
 	}
 
 	// Миграция
-	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.User{}); err != nil {
+	if err := db.AutoMigrate(&models.Cartridge{}, &models.Transaction{}, &models.CartridgeModel{}, &models.User{}); err != nil {
 		t.Fatalf("Ошибка миграции: %v", err)
 	}
 
@@ -413,6 +415,188 @@ func TestAnalyticsService_GetGlobalStats(t *testing.T) {
 
 	if resp.Retired != 1 {
 		t.Errorf("Ожидался 1 утилизированный картридж, получено %d", resp.Retired)
+	}
+}
+
+func TestAnalyticsService_GetRefillsStats(t *testing.T) {
+	setupTestDB(t)
+	defer teardownTestDB(t)
+
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
+	operationSvc := NewOperationServiceServer(testDB)
+	analyticsSvc := NewAnalyticsServiceServer(testDB)
+	ctx := context.Background()
+
+	// Регистрация и цикл заправки
+	_, err := cartridgeSvc.RegisterCartridge(ctx, &proto.RegisterCartridgeRequest{Id: "CART-A", Model: "HP 12A"})
+	if err != nil {
+		t.Fatalf("Не удалось зарегистрировать картридж: %v", err)
+	}
+
+	_, err = operationSvc.SendToRefill(ctx, &proto.SendToRefillRequest{CartridgeId: "CART-A"})
+	if err != nil {
+		t.Fatalf("Не удалось отправить на заправку: %v", err)
+	}
+
+	_, err = operationSvc.ReceiveFromRefill(ctx, &proto.ReceiveFromRefillRequest{CartridgeId: "CART-A"})
+	if err != nil {
+		t.Fatalf("Не удалось принять с заправки: %v", err)
+	}
+
+	now := time.Now()
+	resp, err := analyticsSvc.GetRefillsStats(ctx, &proto.RefillsStatsRequest{
+		PeriodStart: timestamppb.New(now.Add(-time.Hour)),
+		PeriodEnd:   timestamppb.New(now.Add(time.Hour)),
+	})
+	if err != nil {
+		t.Fatalf("Не удалось получить статистику заправок: %v", err)
+	}
+
+	if resp.TotalRefills != 1 {
+		t.Errorf("Ожидалось 1 заправку, получено %d", resp.TotalRefills)
+	}
+	if resp.UniqueCartridges != 1 {
+		t.Errorf("Ожидалось 1 уникальный картридж, получено %d", resp.UniqueCartridges)
+	}
+}
+
+func TestOperationService_GenerateAct(t *testing.T) {
+	setupTestDB(t)
+	defer teardownTestDB(t)
+
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
+	operationSvc := NewOperationServiceServer(testDB)
+	ctx := context.Background()
+
+	ids := []string{"ACT-001", "ACT-002"}
+	for _, id := range ids {
+		_, err := cartridgeSvc.RegisterCartridge(ctx, &proto.RegisterCartridgeRequest{Id: id, Model: "HP 12A"})
+		if err != nil {
+			t.Fatalf("Не удалось зарегистрировать картридж %s: %v", id, err)
+		}
+	}
+
+	resp, err := operationSvc.GenerateAct(ctx, &proto.GenerateActRequest{CartridgeIds: ids})
+	if err != nil {
+		t.Fatalf("Не удалось сгенерировать акт: %v", err)
+	}
+
+	content := string(resp.Value)
+	if !contains(content, "Акт выдачи картриджей") {
+		t.Errorf("Ожидался HTML акт, получено: %s", content)
+	}
+	for _, id := range ids {
+		if !contains(content, id) {
+			t.Errorf("Ожидался акт содержащий ID %s", id)
+		}
+	}
+}
+
+func TestAnalyticsService_ExportRefillsStats(t *testing.T) {
+	setupTestDB(t)
+	defer teardownTestDB(t)
+
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
+	operationSvc := NewOperationServiceServer(testDB)
+	analyticsSvc := NewAnalyticsServiceServer(testDB)
+	ctx := context.Background()
+
+	_, err := cartridgeSvc.RegisterCartridge(ctx, &proto.RegisterCartridgeRequest{Id: "STAT-001", Model: "HP 12A"})
+	if err != nil {
+		t.Fatalf("Не удалось зарегистрировать картридж: %v", err)
+	}
+
+	_, err = operationSvc.SendToRefill(ctx, &proto.SendToRefillRequest{CartridgeId: "STAT-001"})
+	if err != nil {
+		t.Fatalf("Не удалось отправить на заправку: %v", err)
+	}
+
+	_, err = operationSvc.ReceiveFromRefill(ctx, &proto.ReceiveFromRefillRequest{CartridgeId: "STAT-001"})
+	if err != nil {
+		t.Fatalf("Не удалось принять с заправки: %v", err)
+	}
+
+	now := time.Now()
+
+	for _, format := range []string{"csv", "txt"} {
+		resp, err := analyticsSvc.ExportRefillsStats(ctx, &proto.ExportRefillsStatsRequest{
+			PeriodStart: timestamppb.New(now.Add(-time.Hour)),
+			PeriodEnd:   timestamppb.New(now.Add(time.Hour)),
+			Format:      format,
+		})
+		if err != nil {
+			t.Fatalf("Не удалось экспортировать статистику в %s: %v", format, err)
+		}
+		content := string(resp.Value)
+		if !contains(content, "ID картриджа") {
+			t.Fatalf("Ожидался отчет в формате %s, получено: %s", format, content)
+		}
+	}
+}
+
+func TestOperationService_ExportCartridgeHistory(t *testing.T) {
+	setupTestDB(t)
+	defer teardownTestDB(t)
+
+	cartridgeRepo := NewGORMRepository(testDB)
+	cartridgeSvc := NewCartridgeServiceServer(cartridgeRepo)
+	operationSvc := NewOperationServiceServer(testDB)
+	ctx := context.Background()
+
+	_, err := cartridgeSvc.RegisterCartridge(ctx, &proto.RegisterCartridgeRequest{Id: "HIST-001", Model: "HP 12A"})
+	if err != nil {
+		t.Fatalf("Не удалось зарегистрировать картридж: %v", err)
+	}
+
+	_, err = operationSvc.SendToRefill(ctx, &proto.SendToRefillRequest{CartridgeId: "HIST-001"})
+	if err != nil {
+		t.Fatalf("Не удалось отправить на заправку: %v", err)
+	}
+
+	_, err = operationSvc.ReceiveFromRefill(ctx, &proto.ReceiveFromRefillRequest{CartridgeId: "HIST-001"})
+	if err != nil {
+		t.Fatalf("Не удалось принять с заправки: %v", err)
+	}
+
+	for _, format := range []string{"csv", "txt"} {
+		resp, err := operationSvc.ExportCartridgeHistory(ctx, &proto.ExportCartridgeHistoryRequest{CartridgeId: "HIST-001", Format: format})
+		if err != nil {
+			t.Fatalf("Не удалось экспортировать историю в %s: %v", format, err)
+		}
+		content := string(resp.Value)
+		if !contains(content, "ID транзакции") {
+			t.Fatalf("Ожидался отчет об истории в формате %s, получено: %s", format, content)
+		}
+	}
+}
+
+func TestModelService_ListModelsAndUpsertModel(t *testing.T) {
+	setupTestDB(t)
+	defer teardownTestDB(t)
+
+	modelSvc := NewModelServiceServer(testDB)
+	ctx := context.Background()
+
+	resp, err := modelSvc.UpsertModel(ctx, &proto.UpsertModelRequest{Name: "HP 12A"})
+	if err != nil {
+		t.Fatalf("Не удалось создать модель: %v", err)
+	}
+	if resp.Name != "HP 12A" {
+		t.Errorf("Ожидалось имя модели HP 12A, получено %s", resp.Name)
+	}
+
+	listResp, err := modelSvc.ListModels(ctx, &proto.ListModelsRequest{Search: "HP", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("Не удалось получить список моделей: %v", err)
+	}
+	if len(listResp.Models) == 0 {
+		t.Fatalf("Ожидалось хотя бы одну модель, получено %d", len(listResp.Models))
+	}
+	if listResp.Models[0].Name != "HP 12A" {
+		t.Errorf("Ожидалось модель HP 12A, получено %s", listResp.Models[0].Name)
 	}
 }
 

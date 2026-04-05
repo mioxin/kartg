@@ -593,18 +593,25 @@ func (s *AnalyticsServiceServer) GetRefillsStats(ctx context.Context, req *proto
 	var count int64
 	var uniqueCartridges int64
 
-	startTime := req.PeriodStart.AsTime()
-	endTime := req.PeriodEnd.AsTime()
+	startTime := req.PeriodStart.AsTime().Local()
+	endTime := req.PeriodEnd.AsTime().Local()
 
 	// Считаем количество операций приема с заправки
-	query := s.db.Model(&models.Transaction{}).
+	countQuery := s.db.Model(&models.Transaction{}).
 		Where("type = ? AND timestamp BETWEEN ? AND ?",
 			models.OperationTypeReceiveFromRefill, startTime, endTime)
-
-	query.Count(&count)
+	if err := countQuery.Count(&count).Error; err != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при подсчете заправок: %v", err)
+	}
 
 	// Считаем уникальные картриджи
-	query.Distinct("cartridge_id").Count(&uniqueCartridges)
+	distinctQuery := s.db.Model(&models.Transaction{}).
+		Distinct("cartridge_id").
+		Where("type = ? AND timestamp BETWEEN ? AND ?",
+			models.OperationTypeReceiveFromRefill, startTime, endTime)
+	if err := distinctQuery.Count(&uniqueCartridges).Error; err != nil {
+		return nil, status.Errorf(codes.Internal, "ошибка при подсчете уникальных картриджей: %v", err)
+	}
 
 	slog.Info("Получение статистики заправок",
 		"total_refills", count,
@@ -810,7 +817,7 @@ func (s *AnalyticsServiceServer) exportRefillsTXT(transactions []models.Transact
 }
 
 // ExportCartridgeHistory экспортирует историю картриджа в CSV или TXT формате
-func (s *AnalyticsServiceServer) ExportCartridgeHistory(ctx context.Context, req *proto.ExportCartridgeHistoryRequest) (*wrapperspb.BytesValue, error) {
+func (s *OperationServiceServer) ExportCartridgeHistory(ctx context.Context, req *proto.ExportCartridgeHistoryRequest) (*wrapperspb.BytesValue, error) {
 	format := strings.ToLower(req.Format)
 	if format == "" {
 		format = "csv"
@@ -838,7 +845,7 @@ func (s *AnalyticsServiceServer) ExportCartridgeHistory(ctx context.Context, req
 }
 
 // exportHistoryCSV экспортирует историю в CSV формате
-func (s *AnalyticsServiceServer) exportHistoryCSV(transactions []models.Transaction) []byte {
+func (s *OperationServiceServer) exportHistoryCSV(transactions []models.Transaction) []byte {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 	writer.Comma = ';'
@@ -863,7 +870,7 @@ func (s *AnalyticsServiceServer) exportHistoryCSV(transactions []models.Transact
 }
 
 // exportHistoryTXT экспортирует историю в текстовом формате
-func (s *AnalyticsServiceServer) exportHistoryTXT(transactions []models.Transaction, cartridgeID string) []byte {
+func (s *OperationServiceServer) exportHistoryTXT(transactions []models.Transaction, cartridgeID string) []byte {
 	var buf bytes.Buffer
 
 	writeTXTHeader(&buf, "История операций картриджа", "===========================")
