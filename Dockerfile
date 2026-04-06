@@ -43,7 +43,7 @@ WORKDIR /app
 COPY --from=backend /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Копирование бэкенда
-COPY --from=backend /app/server .
+COPY --from=backend /app/kartg-server .
 
 # Копирование фронтенда (статика)
 COPY --from=frontend /app/web/dist ./web
