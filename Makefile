@@ -1,4 +1,4 @@
-.PHONY: gen clean build run start stop restart
+.PHONY: gen clean build run start stop restart web web-dev
 
 # Пути
 PROTOC := protoc
@@ -118,13 +118,22 @@ web-build:
 		cd web && npm run build
 	@echo "Фронтенд собран!"
 
+# Запуск фронтенда (режим prod)
+web:
+	@echo "Запуск фронтенда (prod mode)..."
+	@export NVM_DIR="$(HOME)/.nvm" && \
+		[ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh" && \
+		nvm use 22 && \
+		cd web && npm run dev -- --host 0.0.0.0 
+
 # Запуск фронтенда (режим разработки)
 web-dev:
 	@echo "Запуск фронтенда (dev mode)..."
 	@export NVM_DIR="$(HOME)/.nvm" && \
 		[ -s "$$NVM_DIR/nvm.sh" ] && \. "$$NVM_DIR/nvm.sh" && \
 		nvm use 22 && \
-		cd web && npm run dev
+		cd web && npm run dev -- --host
+
 
 # Установка зависимостей фронтенда
 web-install:

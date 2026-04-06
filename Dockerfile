@@ -4,21 +4,22 @@ FROM golang:1.26-alpine AS backend
 WORKDIR /app
 
 # Установка зависимостей для сборки
+RUN sed -i 's|https://|http://|g' /etc/apk/repositories
 RUN apk add --no-cache git make protoc
 
-# Копирование go.mod и go.sum
+# Копирование go.mod
 COPY go.mod ./
-RUN go mod tidy
 
 # Копирование исходного кода
 COPY . .
+RUN go mod tidy
 
 # Генерация кода из proto
 ENV PATH=$PATH:/root/go/bin
 RUN make gen || true
 
 # Сборка бэкенда
-RUN GOOS=linux go build -o server ./cmd/server
+RUN GOOS=linux go build -o kartg-server ./cmd/server
 
 # Фронтенд
 FROM node:22-alpine AS frontend
@@ -26,6 +27,7 @@ FROM node:22-alpine AS frontend
 WORKDIR /app/web
 
 COPY web/package*.json ./
+RUN sed -i 's|https://|http://|g' /etc/apk/repositories
 RUN npm install
 
 COPY web/ ./
@@ -37,7 +39,8 @@ FROM alpine:latest
 WORKDIR /app
 
 # Установка зависимостей для SQLite
-RUN apk add --no-cache ca-certificates
+# RUN apk add --no-cache ca-certificates
+COPY --from=backend /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Копирование бэкенда
 COPY --from=backend /app/server .
