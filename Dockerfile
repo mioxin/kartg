@@ -18,7 +18,7 @@ ENV PATH=$PATH:/root/go/bin
 RUN make generate || true
 
 # Сборка бэкенда
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
+RUN GOOS=linux go build -o server ./cmd/server
 
 # Фронтенд
 FROM node:22-alpine AS frontend
