@@ -52,4 +52,6 @@ RUN mkdir -p /app/data
 EXPOSE 8080
 
 # Запуск сервера
-CMD ["./server", "-http-port", ":8080", "-db-path", "/app/data/kartg.db"]
+ENV JWT_SECRET=ваш_секретный_ключ
+ENV ADMIN_PASSWORD=123
+CMD ["sh", "-c", "export JWT_SECRET=${JWT_SECRET} && export ADMIN_PASSWORD=${ADMIN_PASSWORD} && nohup ./kartg-server > kartg.log 2>&1 &"]
