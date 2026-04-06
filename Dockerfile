@@ -1,5 +1,5 @@
 # Бэкенд
-FROM golang:1.22-alpine AS backend
+FROM golang:1.26-alpine AS backend
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN make generate || true
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
 
 # Фронтенд
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 
 WORKDIR /app/web
 
