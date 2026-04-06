@@ -1,9 +1,11 @@
 .PHONY: gen clean build run start stop restart
 
 # Пути
-PROTOC := $(HOME)/local/bin/protoc
+PROTOC := protoc
+#$(HOME)/local/bin/protoc
 PROTO_PATH := api/proto
-INCLUDE_PATH := third_party:$(HOME)/local/include
+INCLUDE_PATH := third_party
+#:$(HOME)/local/include
 
 # ==================== Генерация ====================
 
