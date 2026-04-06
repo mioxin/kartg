@@ -12,11 +12,11 @@ COPY go.mod ./
 
 # Копирование исходного кода
 COPY . .
-RUN go mod tidy
 
 # Генерация кода из proto
 ENV PATH=$PATH:/root/go/bin
 RUN make gen || true
+RUN go mod tidy
 
 # Сборка бэкенда
 RUN GOOS=linux go build -o kartg-server ./cmd/server
