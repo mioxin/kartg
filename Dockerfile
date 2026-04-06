@@ -15,7 +15,7 @@ COPY . .
 
 # Генерация кода из proto
 ENV PATH=$PATH:/root/go/bin
-RUN make generate || true
+RUN make gen || true
 
 # Сборка бэкенда
 RUN GOOS=linux go build -o server ./cmd/server
