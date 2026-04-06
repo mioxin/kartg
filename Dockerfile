@@ -7,8 +7,8 @@ WORKDIR /app
 RUN apk add --no-cache git make protoc
 
 # Копирование go.mod и go.sum
-COPY go.mod go.sum ./
-RUN go mod download
+COPY go.mod ./
+RUN go mod tidy
 
 # Копирование исходного кода
 COPY . .
